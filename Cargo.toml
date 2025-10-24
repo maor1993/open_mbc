@@ -1,0 +1,29 @@
+[package]
+name = "open_mbc"
+version = "0.1.0"
+edition = "2021"
+authors = ["Maor Malka <maor1993@outlook.com>"]
+license = "GPL-3.0-or-later"
+homepage = "https://youtu.be/dQw4w9WgXcQ"
+description = "Open Multi band compressor"
+
+[workspace]
+members = ["xtask"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["assert_process_allocs"] }
+
+
+
+
+[profile.release]
+lto = "thin"
+strip = "symbols"
+
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = "none"
