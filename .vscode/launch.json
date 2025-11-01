@@ -1,0 +1,13 @@
+{
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "attach",
+            "name": "Attach by PID",
+            "pid": "${command:pickProcess}", // Prompts to select a running process
+            "sourceLanguages": [
+                "rust"
+            ],
+        }
+    ]
+}

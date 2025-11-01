@@ -14,9 +14,14 @@ members = ["xtask"]
 crate-type = ["cdylib"]
 
 [dependencies]
-nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["assert_process_allocs"] }
-
-
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = [
+    "assert_process_allocs",
+] }
+cute-dsp = { git = "https://github.com/CuteDSP/RSCuteDSP", features = ["std"] }
+vizia = { git = "https://github.com/robbert-vdh/vizia.git", default-features = false, features = [
+    "baseview",
+] }
+crossbeam = "0.8.4"
 
 
 [profile.release]
