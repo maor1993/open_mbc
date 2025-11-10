@@ -22,6 +22,11 @@ vizia = { git = "https://github.com/robbert-vdh/vizia.git", default-features = f
     "baseview",
 ] }
 crossbeam = "0.8.4"
+anyhow = "1.0.100"
+
+
+[dev-dependencies]
+plotters = {version = "0.3.7"}
 
 
 [profile.release]

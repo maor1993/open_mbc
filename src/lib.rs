@@ -138,7 +138,7 @@ struct CompFilter {
 impl Default for CompFilter {
     fn default() -> Self {
         Self {
-            comp: Compressor::default(),
+            comp: Compressor::new(0.0),
             filt: Biquad::<f32>::new(true),
         }
     }
@@ -244,13 +244,7 @@ impl Plugin for OpenMbc {
                 self.params.comps[idx].center_freq.value() / self.sample_rate,
                 self.params.comps[idx].q.value(),
             );
-            comp_filt.comp.update_params(
-                self.sample_rate,
-                self.params.comps[idx].threshold.value(),
-                self.params.comps[idx].ratio.value(),
-                self.params.comps[idx].attack.value(),
-                self.params.comps[idx].release.value(),
-            );
+
         }
         //THIS IS STEREO!
         for channel_samples in buffer.iter_samples() {

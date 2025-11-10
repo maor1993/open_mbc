@@ -8,6 +8,14 @@
             "sourceLanguages": [
                 "rust"
             ],
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Launch",
+            "program": "${workspaceFolder}/<program>",
+            "args": [],
+            "cwd": "${workspaceFolder}"
         }
     ]
 }
