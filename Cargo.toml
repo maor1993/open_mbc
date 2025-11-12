@@ -27,6 +27,7 @@ anyhow = "1.0.100"
 
 [dev-dependencies]
 plotters = {version = "0.3.7"}
+wavers = "1.5.1"
 
 
 [profile.release]
