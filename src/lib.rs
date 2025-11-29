@@ -1,10 +1,13 @@
-use cute_dsp::filters::Biquad;
+use cute_dsp::filters::FilterType;
 use nih_plug::prelude::*;
 use std::sync::Arc;
 
 mod compressor;
 
 use compressor::Compressor;
+
+mod crossover;
+use crossover::Crossover;
 
 // This is a shortened version of the gain example with most comments removed, check out
 // https://github.com/robbert-vdh/nih-plug/blob/master/plugins/examples/gain/src/lib.rs to get
@@ -38,9 +41,9 @@ struct CompParams {
     #[id = "center_freq"]
     pub center_freq: FloatParam,
 
-    #[id = "q"]
+    #[id = "q"] //TODO: rename to octaves or convert to Q...
     pub q: FloatParam,
-    //TODO:
+
     #[id = "threshold"]
     pub threshold: FloatParam,
 
@@ -68,7 +71,8 @@ impl Default for CompParams {
                     min: FREQ_RANGE_MIN,
                     max: FREQ_RANGE_MAX,
                 },
-            ).with_smoother(SmoothingStyle::Linear(DEFAULT_SMOOTHING_MSEC)),
+            )
+            .with_smoother(SmoothingStyle::Linear(DEFAULT_SMOOTHING_MSEC)),
             ratio: FloatParam::new(
                 "Ratio",
                 1.0,
@@ -76,7 +80,8 @@ impl Default for CompParams {
                     min: 1.0,
                     max: 10.0,
                 },
-            ).with_smoother(SmoothingStyle::Linear(DEFAULT_SMOOTHING_MSEC)),
+            )
+            .with_smoother(SmoothingStyle::Linear(DEFAULT_SMOOTHING_MSEC)),
             q: FloatParam::new(
                 "Q",
                 1.0,
@@ -84,7 +89,8 @@ impl Default for CompParams {
                     min: 0.1,
                     max: 10.0,
                 },
-            ).with_smoother(SmoothingStyle::Linear(DEFAULT_SMOOTHING_MSEC)),
+            )
+            .with_smoother(SmoothingStyle::Linear(DEFAULT_SMOOTHING_MSEC)),
             threshold: FloatParam::new(
                 "Threshold",
                 util::db_to_gain(0.0),
@@ -105,7 +111,8 @@ impl Default for CompParams {
                     min: 1.0,
                     max: 1000.0,
                 },
-            ).with_smoother(SmoothingStyle::Linear(DEFAULT_SMOOTHING_MSEC)),
+            )
+            .with_smoother(SmoothingStyle::Linear(DEFAULT_SMOOTHING_MSEC)),
             release: FloatParam::new(
                 "Release",
                 100.0,
@@ -113,7 +120,8 @@ impl Default for CompParams {
                     min: 10.0,
                     max: 10000.0,
                 },
-            ).with_smoother(SmoothingStyle::Linear(DEFAULT_SMOOTHING_MSEC)),
+            )
+            .with_smoother(SmoothingStyle::Linear(DEFAULT_SMOOTHING_MSEC)),
             gain: FloatParam::new(
                 "Gain",
                 util::db_to_gain(0.0),
@@ -133,13 +141,13 @@ impl Default for CompParams {
 
 struct CompFilter {
     comp: Compressor,
-    filt: Biquad<f32>,
+    filt: Crossover,
 }
 impl Default for CompFilter {
     fn default() -> Self {
         Self {
             comp: Compressor::new(0.0),
-            filt: Biquad::<f32>::new(true),
+            filt: Crossover::new(0.0, FilterType::Bandpass),
         }
     }
 }
@@ -218,10 +226,11 @@ impl Plugin for OpenMbc {
         self.sample_rate = _buffer_config.sample_rate;
 
         for (idx, comp_filt) in self.comp_filt_state.iter_mut().enumerate() {
-            comp_filt.filt.bandpass(
-                  self.params.comps[idx].center_freq.value()/ self.sample_rate,
-                self.params.comps[idx].q.value(),
-            );
+            comp_filt.filt.sample_rate = self.sample_rate;
+            comp_filt.filt.center_freq = self.params.comps[idx].center_freq.value();
+            comp_filt.filt.octaves = self.params.comps[idx].q.value();
+            comp_filt.filt.configure();
+
             comp_filt.comp.update_sample_rate(self.sample_rate);
         }
 
@@ -239,8 +248,8 @@ impl Plugin for OpenMbc {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        let mut tot_enabled_chs = 0;
-        //reconfigure all states
+        let mut tot_enabled_chs = 1; //small kombina, we start with one as we always have the aux channel
+                                     //reconfigure all states
         for (idx, comp_filt) in self.comp_filt_state.iter_mut().enumerate() {
             let this_comp = &self.params.comps[idx];
 
@@ -252,10 +261,9 @@ impl Plugin for OpenMbc {
             if (this_comp.center_freq.smoothed.is_smoothing())
                 || (this_comp.q.smoothed.is_smoothing())
             {
-                comp_filt.filt.bandpass(
-                     this_comp.center_freq.smoothed.next() / self.sample_rate,
-                    this_comp.q.smoothed.next(),
-                );
+                comp_filt.filt.center_freq = this_comp.center_freq.smoothed.next();
+                comp_filt.filt.octaves = this_comp.q.smoothed.next();
+                comp_filt.filt.configure();
             }
 
             // handle comp update
@@ -296,19 +304,22 @@ impl Plugin for OpenMbc {
                     .iter_mut()
                     .enumerate()
                     .map(|(idx, comp_filt)| {
+                        let this_comp_params = &self.params.comps[idx];
+
                         //filter
-                        let filt = comp_filt.filt.process(*sample);
+                        let (filt_main, filt_aux) = comp_filt.filt.process(*sample);
 
                         //compress
-                        let comp = comp_filt.comp.process(filt, None);
+                        let comp = comp_filt.comp.process(filt_main, None);
 
                         //bypass
                         //TODO: maybe change this such that we don't even run the filter and compressor if not enabled, cheaper on processor
                         if self.params.comps[idx].enable.value() {
                             comp * self.params.comps[idx].gain.smoothed.next()
                                 * (1.0 / tot_enabled_chs as f32)
+                                + filt_aux * (1.0 / tot_enabled_chs as f32)
                         } else {
-                            0.0
+                            filt_aux * (1.0 / MAX_MBCS as f32)
                         }
                     })
                     .sum();
