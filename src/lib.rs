@@ -2,7 +2,6 @@ use cute_dsp::filters::Biquad;
 use nih_plug::prelude::*;
 use std::sync::Arc;
 
-
 mod compressor;
 
 use compressor::Compressor;
@@ -57,6 +56,7 @@ struct CompParams {
     pub gain: FloatParam,
 }
 
+const DEFAULT_SMOOTHING_MSEC: f32 = 5.0;
 impl Default for CompParams {
     fn default() -> Self {
         Self {
@@ -68,7 +68,7 @@ impl Default for CompParams {
                     min: FREQ_RANGE_MIN,
                     max: FREQ_RANGE_MAX,
                 },
-            ),
+            ).with_smoother(SmoothingStyle::Linear(DEFAULT_SMOOTHING_MSEC)),
             ratio: FloatParam::new(
                 "Ratio",
                 1.0,
@@ -76,7 +76,7 @@ impl Default for CompParams {
                     min: 1.0,
                     max: 10.0,
                 },
-            ),
+            ).with_smoother(SmoothingStyle::Linear(DEFAULT_SMOOTHING_MSEC)),
             q: FloatParam::new(
                 "Q",
                 1.0,
@@ -84,7 +84,7 @@ impl Default for CompParams {
                     min: 0.1,
                     max: 10.0,
                 },
-            ),
+            ).with_smoother(SmoothingStyle::Linear(DEFAULT_SMOOTHING_MSEC)),
             threshold: FloatParam::new(
                 "Threshold",
                 util::db_to_gain(0.0),
@@ -105,7 +105,7 @@ impl Default for CompParams {
                     min: 1.0,
                     max: 1000.0,
                 },
-            ),
+            ).with_smoother(SmoothingStyle::Linear(DEFAULT_SMOOTHING_MSEC)),
             release: FloatParam::new(
                 "Release",
                 100.0,
@@ -113,7 +113,7 @@ impl Default for CompParams {
                     min: 10.0,
                     max: 10000.0,
                 },
-            ),
+            ).with_smoother(SmoothingStyle::Linear(DEFAULT_SMOOTHING_MSEC)),
             gain: FloatParam::new(
                 "Gain",
                 util::db_to_gain(0.0),
@@ -219,9 +219,10 @@ impl Plugin for OpenMbc {
 
         for (idx, comp_filt) in self.comp_filt_state.iter_mut().enumerate() {
             comp_filt.filt.bandpass(
-                self.sample_rate / self.params.comps[idx].center_freq.value(),
+                  self.params.comps[idx].center_freq.value()/ self.sample_rate,
                 self.params.comps[idx].q.value(),
             );
+            comp_filt.comp.update_sample_rate(self.sample_rate);
         }
 
         true
@@ -238,13 +239,53 @@ impl Plugin for OpenMbc {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        let mut tot_enabled_chs = 0;
         //reconfigure all states
         for (idx, comp_filt) in self.comp_filt_state.iter_mut().enumerate() {
-            comp_filt.filt.bandpass(
-                self.params.comps[idx].center_freq.value() / self.sample_rate,
-                self.params.comps[idx].q.value(),
-            );
+            let this_comp = &self.params.comps[idx];
 
+            if this_comp.enable.value() {
+                tot_enabled_chs += 1;
+            }
+
+            // handle bpf update
+            if (this_comp.center_freq.smoothed.is_smoothing())
+                || (this_comp.q.smoothed.is_smoothing())
+            {
+                comp_filt.filt.bandpass(
+                     this_comp.center_freq.smoothed.next() / self.sample_rate,
+                    this_comp.q.smoothed.next(),
+                );
+            }
+
+            // handle comp update
+            if this_comp.attack.smoothed.is_smoothing() {
+                comp_filt
+                    .comp
+                    .solver
+                    .update_attack(this_comp.attack.smoothed.next());
+            }
+
+            if this_comp.release.smoothed.is_smoothing() {
+                comp_filt
+                    .comp
+                    .solver
+                    .update_release(this_comp.release.smoothed.next());
+            }
+
+            if this_comp.ratio.smoothed.is_smoothing() {
+                comp_filt
+                    .comp
+                    .solver
+                    .update_ratio(this_comp.ratio.smoothed.next());
+            }
+            if this_comp.threshold.smoothed.is_smoothing() {
+                comp_filt.comp.solver.threshold = this_comp.threshold.smoothed.next();
+            }
+
+            //TODO: missing params - makeup gain, knee width, compressor type
+
+            //TODO: missing settings - side chain!
         }
         //THIS IS STEREO!
         for channel_samples in buffer.iter_samples() {
@@ -253,15 +294,19 @@ impl Plugin for OpenMbc {
                 let total = self
                     .comp_filt_state
                     .iter_mut()
-                    .map(|comp_filt| {
-                        // let smp = comp_filt.filt.process(*sample);
-                        comp_filt.comp.process(*sample, None)
-                    })
                     .enumerate()
-                    .map(|(idx, smp)| {
+                    .map(|(idx, comp_filt)| {
+                        //filter
+                        let filt = comp_filt.filt.process(*sample);
+
+                        //compress
+                        let comp = comp_filt.comp.process(filt, None);
+
+                        //bypass
+                        //TODO: maybe change this such that we don't even run the filter and compressor if not enabled, cheaper on processor
                         if self.params.comps[idx].enable.value() {
-                            smp * self.params.comps[idx].gain.smoothed.next()
-                                * (1.0 / MAX_MBCS as f32)
+                            comp * self.params.comps[idx].gain.smoothed.next()
+                                * (1.0 / tot_enabled_chs as f32)
                         } else {
                             0.0
                         }

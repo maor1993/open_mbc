@@ -35,6 +35,11 @@ impl CompressorSolver {
             ..Default::default()
         }
     }
+    pub fn update_sample_rate(&mut self, sample_rate: f32){
+        self.sample_rate = sample_rate;
+        //TODO: after changing sample rate we need to reconfigure compressor
+    }
+
     pub fn update_ratio(&mut self, ratio: f32) {
         self.ratio = 1.0 - (1.0 / ratio)
     }

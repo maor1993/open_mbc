@@ -11,10 +11,11 @@ use crate::compressor::{models::CompressionEmulationEnum, process::CurveType};
 pub struct Compressor {
     bypass: bool,
     curr_reduction: f32,
+    curr_reduction_post_model: f32,
     makeup_gain_db: f32,
     curve_type: CurveType,
     compressor_model: CompressionEmulationEnum,
-    solver: CompressorSolver,
+    pub solver: CompressorSolver,
 }
 
 impl Compressor {
@@ -22,11 +23,18 @@ impl Compressor {
         Compressor {
             bypass: false,
             curr_reduction: 0.0,
+            curr_reduction_post_model: 0.0,
             makeup_gain_db: 0.0,
             curve_type: CurveType::default(),
-            compressor_model: CompressionEmulationEnum::Ideal(models::IdealCompressor), //TODO: make this better.
+            compressor_model: CompressionEmulationEnum::new_ideal(),
             solver: CompressorSolver::new(sample_rate),
         }
+    }
+    pub fn update_compressor_model(&mut self, emulation_type: CompressionEmulationEnum) {
+        self.compressor_model = emulation_type;
+    }
+    pub fn update_sample_rate(&mut self,sample_rate: f32) {
+        self.solver.update_sample_rate(sample_rate);
     }
 
     //TODO: inline everything?
@@ -34,13 +42,11 @@ impl Compressor {
     fn handle_reduction_calc(&mut self, sidechain_db: f32) -> f32 {
         // step 1: get the ideal reduction needed given the current state of the filter
         let ideal_reduction = self.solver.get_ideal_reduction(sidechain_db);
-        //println!("ideal_reduction step 1: {}", ideal_reduction);
         //step 2: apply smoothing
         let output_reduction;
         (output_reduction, self.curr_reduction) =
             self.solver
                 .apply_curve(self.curr_reduction, ideal_reduction, &self.curve_type);
-        //println!("ideal_reduction step 2: {}", self.curr_reduction);
         //step 3: apply compressor modeling
         let model_reduciton = self
             .compressor_model
@@ -48,7 +54,7 @@ impl Compressor {
 
         //step 4: filtering
         //TODO
-
+        self.curr_reduction_post_model = model_reduciton;
         return model_reduciton;
     }
 
@@ -71,6 +77,8 @@ impl Compressor {
 
 #[cfg(test)]
 mod tests {
+    use crate::compressor::models::CompressionEmulationEnum;
+
     use super::Compressor;
     use anyhow::Error;
     use plotters::prelude::*;
@@ -322,6 +330,39 @@ mod tests {
                 input: sample,
                 output: smp,
                 reduciton: -comp.curr_reduction,
+            });
+        }
+        testresults.draw_plot().unwrap();
+    }
+
+    #[test]
+    fn run_compressor_ex005() {
+        use super::models::CompressionEmulationEnum;
+        let mut comp = Compressor::new(44100.0);
+
+        comp.solver.threshold = -25.0;
+        comp.solver.update_ratio(12.0);
+        comp.curve_type = super::process::CurveType::LogSmoothBranching;
+        comp.solver.update_attack(5.0);
+        comp.solver.update_release(10.0);
+        comp.update_compressor_model(CompressionEmulationEnum::new_optical(44100.0, 37, 2));
+
+        //let samples = get_wave_stream("testfiles/tambourine_studio_short_loop_2_cF2.wav");
+        let samples = gen_test_ramp();
+
+        let mut testresults = Results {
+            filename: "tmp/ex005.png",
+            ..Default::default()
+        };
+
+        for (idx, sample) in samples.iter().enumerate() {
+            let smp = comp.process(*sample, None);
+
+            testresults.samples.push(ResultSample {
+                idx,
+                input: *sample,
+                output: smp,
+                reduciton: -comp.curr_reduction_post_model,
             });
         }
         testresults.draw_plot().unwrap();
