@@ -9,10 +9,11 @@ use compressor::Compressor;
 mod crossover;
 use crossover::Crossover;
 
-mod ui;
-use nih_plug_vizia::ViziaState;
+// This is a shortened version of the gain example with most comments removed, check out
+// https://github.com/robbert-vdh/nih-plug/blob/master/plugins/examples/gain/src/lib.rs to get
+// started
 
-pub struct OpenMbc {
+struct OpenMbc {
     params: Arc<OpenMbcParams>,
     sample_rate: f32,
     comp_filt_state: [CompFilter; MAX_MBCS],
@@ -20,10 +21,10 @@ pub struct OpenMbc {
 
 #[derive(Params)]
 struct OpenMbcParams {
-
-    #[persist ="editor-state"]
-    editor_state: Arc<ViziaState>,
-
+    /// The parameter's ID is used to identify the parameter in the wrappred plugin API. As long as
+    /// these IDs remain constant, you can rename and reorder these fields as you wish. The
+    /// parameters are exposed to the host in the same order they were defined. In this case, this
+    /// gain parameter is stored as linear gain while the values are displayed in decibels.
     #[nested(array, group = "Comps")]
     pub comps: [CompParams; MAX_MBCS],
 }
@@ -34,9 +35,6 @@ const FREQ_RANGE_MAX: f32 = 20_000.0;
 
 #[derive(Params)]
 struct CompParams {
-
-
-
     #[id = "enable"]
     pub enable: BoolParam,
 
@@ -65,7 +63,6 @@ const DEFAULT_SMOOTHING_MSEC: f32 = 5.0;
 impl Default for CompParams {
     fn default() -> Self {
         Self {
-            
             enable: BoolParam::new("Enable", false),
             center_freq: FloatParam::new(
                 "Center",
@@ -168,7 +165,9 @@ impl Default for OpenMbc {
 impl Default for OpenMbcParams {
     fn default() -> Self {
         Self {
-            editor_state: ui::default_state(),
+            // This gain is stored as linear gain. NIH-plug comes with useful conversion functions
+            // to treat these kinds of parameters as if we were dealing with decibels. Storing this
+            // as decibels is easier to work with, but requires a conversion for every sample.
             comps: std::array::from_fn(|_| CompParams::default()),
         }
     }
@@ -213,14 +212,6 @@ impl Plugin for OpenMbc {
 
     fn params(&self) -> Arc<dyn Params> {
         self.params.clone()
-    }
-
-    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
-        ui::create(
-            self.params.clone(),
-            atomic_float::AtomicF32::new(0.0).into(),
-         self.params.editor_state.clone()
-        )
     }
 
     fn initialize(
@@ -304,7 +295,7 @@ impl Plugin for OpenMbc {
 
             //TODO: missing settings - side chain!
         }
-        //TODO:THIS IS STEREO!
+        //THIS IS STEREO!
         for channel_samples in buffer.iter_samples() {
             for sample in channel_samples {
                 // feed the signal to each filter seperately
@@ -323,8 +314,8 @@ impl Plugin for OpenMbc {
 
                         //bypass
                         //TODO: maybe change this such that we don't even run the filter and compressor if not enabled, cheaper on processor
-                        if this_comp_params.enable.value() {
-                            comp * this_comp_params.gain.smoothed.next()
+                        if self.params.comps[idx].enable.value() {
+                            comp * self.params.comps[idx].gain.smoothed.next()
                                 * (1.0 / tot_enabled_chs as f32)
                                 + filt_aux * (1.0 / tot_enabled_chs as f32)
                         } else {

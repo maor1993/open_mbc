@@ -6,8 +6,7 @@
             "name": "Attach by PID",
             "pid": "${command:pickProcess}", // Prompts to select a running process
             "sourceLanguages": [
-                "rust",
-                "cpp"
+                "rust"
             ],
         },
         {

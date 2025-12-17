@@ -11,23 +11,18 @@ description = "Open Multi band compressor"
 members = ["xtask"]
 
 [lib]
-crate-type = ["cdylib","lib"]
+crate-type = ["cdylib"]
 
 [dependencies]
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = [
     "assert_process_allocs",
-    "standalone"
 ] }
-nih_plug_vizia = { git = "https://github.com/robbert-vdh/nih-plug.git"}
-
 cute-dsp = { git = "https://github.com/CuteDSP/RSCuteDSP", features = ["std"] }
-vizia = { version = "0.3.0"}
-# vizia = { git = "https://github.com/robbert-vdh/vizia.git", default-features = false, features = [
-#     "baseview",
-# ] }
+vizia = { git = "https://github.com/robbert-vdh/vizia.git", default-features = false, features = [
+    "baseview",
+] }
 crossbeam = "0.8.4"
 anyhow = "1.0.100"
-atomic_float = "1.1.0"
 
 
 [dev-dependencies]
