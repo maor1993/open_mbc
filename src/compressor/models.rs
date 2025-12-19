@@ -71,7 +71,7 @@ impl OpticalCompressor {
             let step_db = idx as f32 / coeffs_per_step as f32;
             let resistance = 480.0 / (3.0 + step_db);
             let attack_rate = resistance / 10.0;
-            let release_rate = resistance; 
+            let release_rate = resistance;
 
             attack_coeffs[idx] = (0.27_f32.ln() / (sample_rate * attack_rate / 1000.0)).exp();
             release_coeffs[idx] = (0.27_f32.ln() / (sample_rate * release_rate / 1000.0)).exp();
@@ -89,8 +89,8 @@ impl OpticalCompressor {
 }
 
 impl CompressionModel for OpticalCompressor {
-    //we're modeling two behiviours 
-    // old LDRs had slow rise and fall times, we model that by delaying the output of the compressor factor 
+    //we're modeling two behiviours
+    // old LDRs had slow rise and fall times, we model that by delaying the output of the compressor factor
     // the LDR has an inverse log response curve, as such, at a certain limit the effect of the change in input power is saturated.
 
     fn get_gain_reduction(&mut self, new_reduction: f32, ideal_reduction: f32) -> f32 {

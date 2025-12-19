@@ -33,7 +33,7 @@ impl Compressor {
     pub fn update_compressor_model(&mut self, emulation_type: CompressionEmulationEnum) {
         self.compressor_model = emulation_type;
     }
-    pub fn update_sample_rate(&mut self,sample_rate: f32) {
+    pub fn update_sample_rate(&mut self, sample_rate: f32) {
         self.solver.update_sample_rate(sample_rate);
     }
 
