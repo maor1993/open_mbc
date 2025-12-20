@@ -13,7 +13,7 @@
             "type": "lldb",
             "request": "launch",
             "name": "Launch",
-            "program": "${workspaceFolder}/<program>",
+            "program": "${workspaceFolder}/target/debug/open_mbc",
             "args": [],
             "cwd": "${workspaceFolder}"
         }

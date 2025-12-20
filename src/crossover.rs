@@ -5,14 +5,14 @@ pub struct Crossover {
     pub center_freq: f32,
     pub octaves: f32,
     pub mode: FilterType,
-    main_filter: Biquad<f32>,
-    aux_filter: Biquad<f32>,
+    main_filter: Biquad<f64>,
+    aux_filter: Biquad<f64>,
 }
 
 impl Crossover {
     pub fn new(sample_rate: f32, mode: FilterType) -> Self {
-        let main_filter = Biquad::<f32>::new(true);
-        let aux_filter = Biquad::<f32>::new(true);
+        let main_filter = Biquad::<f64>::new(true);
+        let aux_filter = Biquad::<f64>::new(true);
         Self {
             sample_rate,
             center_freq: 0.0,
@@ -27,9 +27,9 @@ impl Crossover {
         match self.mode {
             FilterType::Bandpass => {
                 self.main_filter
-                    .bandpass(self.center_freq / self.sample_rate, self.octaves);
+                    .bandpass((self.center_freq / self.sample_rate) as f64, self.octaves  as f64);
                 self.aux_filter
-                    .notch(self.center_freq / self.sample_rate, self.octaves)
+                    .notch((self.center_freq / self.sample_rate) as f64, self.octaves as f64)
             }
             _ => todo!(),
         };
@@ -37,8 +37,15 @@ impl Crossover {
 
     pub fn process(&mut self, sample: f32) -> (f32, f32) {
         (
-            self.main_filter.process(sample),
-            self.aux_filter.process(sample),
+            self.main_filter.process(sample as f64) as f32,
+            self.aux_filter.process(sample as f64) as f32,
         )
+    }
+
+    pub fn get_main_filter(&self) -> &Biquad<f64> {
+        &self.main_filter
+    }
+    pub fn get_aux_filter(&self) -> &Biquad<f64> {
+        &self.aux_filter
     }
 }

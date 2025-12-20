@@ -1,7 +1,7 @@
 use cute_dsp::filters::FilterType;
-use egui_plot::Plot;
 use nih_plug::prelude::*;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 mod compressor;
 
@@ -10,21 +10,16 @@ use compressor::Compressor;
 mod crossover;
 use crossover::Crossover;
 
-use nih_plug_egui::{
-    create_egui_editor,
-    egui::{self, Vec2},
-    resizable_window::ResizableWindow,
-    widgets, EguiState,
-};
+mod ui;
+use ui::build_editor;
+use ui::UiData;
 
-// This is a shortened version of the gain example with most comments removed, check out
-// https://github.com/robbert-vdh/nih-plug/blob/master/plugins/examples/gain/src/lib.rs to get
-// started
-
+use nih_plug_egui::EguiState;
 pub struct OpenMbc {
     params: Arc<OpenMbcParams>,
     sample_rate: f32,
-    comp_filt_state: [CompFilter; MAX_MBCS],
+    comp_filt_state: [CompFilter; MAX_MBCS], 
+    ui_data: Arc<Mutex<UiData>>
 }
 
 #[derive(Params)]
@@ -165,6 +160,7 @@ impl Default for OpenMbc {
             params: Arc::new(OpenMbcParams::default()),
             sample_rate: 0.0,
             comp_filt_state: std::array::from_fn(|_| CompFilter::default()),
+            ui_data: Arc::new(Mutex::new(UiData::default()))
         }
     }
 }
@@ -230,6 +226,7 @@ impl Plugin for OpenMbc {
         // The `reset()` function is always called right after this function. You can remove this
         // function if you do not need it.
         self.sample_rate = _buffer_config.sample_rate;
+        self.ui_data.lock().unwrap().sample_rate = self.sample_rate;
 
         for (idx, comp_filt) in self.comp_filt_state.iter_mut().enumerate() {
             comp_filt.filt.sample_rate = self.sample_rate;
@@ -251,137 +248,8 @@ impl Plugin for OpenMbc {
     fn editor(&mut self, async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
         let params = self.params.clone();
         let egui_state = params.editor_state.clone();
-
-
-        create_egui_editor(
-            self.params.editor_state.clone(),
-            (),
-            Default::default(),
-            |_, _, _| {},
-            move |egui_ctx, setter, _queue, _state| {
-                // Generate x values
-                let xs: Vec<f64> = (FREQ_RANGE_MIN as usize..FREQ_RANGE_MAX as usize)
-                    .map(|x| x as f64)
-                    .collect();
-                
-                // Generate sin(x) and bounds
-                let ys: Vec<f64> = xs.iter().map(|&x| 0.0).collect();
-                // Create the center line
-                let sin_line = egui_plot::Line::new(
-                    "sin(x)",
-                    xs.iter()
-                        .zip(ys.iter())
-                        .map(|(&x, &y)| [x, y])
-                        .collect::<egui_plot::PlotPoints<'_>>(),
-                )
-                .width(2.0).color(egui::Color32::from_rgb(200, 100, 100));
-
-                ResizableWindow::new("res-wind")
-                    .min_size(Vec2::new(128.0, 128.0))
-                    .show(egui_ctx, egui_state.as_ref(), |ui| {
-                        // This is a fancy widget that can get all the information it needs to properly
-                        // display and modify the parameter from the parametr itself
-                        // It's not yet fully implemented, as the text is missing.
-                        
-                        ui.label("Some random integer");
-                        ui.add(widgets::ParamSlider::for_param(&params.comps[0].q, setter));
-
-                        ui.label("Gain");
-                        ui.add(widgets::ParamSlider::for_param(&params.comps[0].gain, setter));
-
-                        ui.label(
-                        "Also gain, but with a standard widget. Note that it doesn't properly take the parameter curve into account!",
-                        );
-
-                        // This is a simple naive version of a parameter slider that's not aware of how
-                        // the parameters work
-                        let prev_value = nih_plug::util::gain_to_db(params.comps[0].gain.value());
-                        let mut new_value = prev_value;
-                        ui.add(
-                            egui::widgets::Slider::new(&mut new_value, -30.0..=30.0).suffix(" dB"),
-                        );
-                        if new_value != prev_value {
-                            setter.begin_set_parameter(&params.comps[0].gain);
-                            setter
-                                .set_parameter(&params.comps[0].gain, nih_plug::util::db_to_gain(new_value));
-                            setter.end_set_parameter(&params.comps[0].gain);
-                        }
-
-                        // TODO: Add a proper custom widget instead of reusing a progress bar
-                        // let peak_meter =
-                        //     util::gain_to_db(peak_meter.load(std::sync::atomic::Ordering::Relaxed));
-                        let peak_meter = -33.0;
-                        let peak_meter_text = if peak_meter > util::MINUS_INFINITY_DB {
-                            format!("{peak_meter:.1} dBFS")
-                        } else {
-                            String::from("-inf dBFS")
-                        }; 
-                        
-                        let peak_meter_normalized = (peak_meter + 60.0) / 60.0;
-
-
-                                    let plot = Plot::new("eq_plot")
-                .height(300.0)
-                .allow_zoom(false)
-                .allow_drag(false)
-                .allow_scroll(false)
-                .show_axes([true, true])
-                .label_formatter(|_, _| "".to_owned()); // Disable default tooltip
-
-                        plot.show(ui, |plot_ui| {
-                            // Generate line points
-                            let n = 512;
-                            let points: egui_plot::PlotPoints = (0..n)
-                                .map(|i| {
-                                    let x = 20.0 * (20000.0 / 20.0f64).powf(i as f64 / n as f64);
-                                    let y = 0.0;
-                                    [x.ln(), y] // Using log scale for X axis visualization
-                                })
-                                .collect();
-
-                            let line = egui_plot::Line::new("",points).color(egui::Color32::from_rgb(100, 200, 255)).width(2.0);
-                            plot_ui.line(line);
-
-                            // 2. Cursor Logic: Check proximity to the line
-                            if let Some(pointer_pos) = plot_ui.pointer_coordinate() {
-                                let curve_y = 0.0;
-                                let dist = (pointer_pos.y - curve_y).abs();
-
-                                // Threshold for "being on the line" in plot units
-                                // Adjust based on your Y-axis scale (Gain range)
-                                if dist < 0.5 {
-                                    // self.snapped_point = Some([pointer_pos.x, curve_y]);
-                                    
-                                    // Draw a highlight point
-                                    let highlight = egui_plot::Points::new("",vec![[pointer_pos.x, curve_y]])
-                                        .color(egui::Color32::WHITE)
-                                        .radius(4.0);
-                                    plot_ui.points(highlight);
-
-                                    // Using the modern tooltip API
-                                    // egui::Tooltip::always_open(ui.ctx(), parent_layer, parent_widget, anchor)
-
-
-
-                                    // egui::show_tooltip_at_pointer(ui.ctx(), egui::Id::new("eq_tooltip"), "",|ui| {
-                                    //     ui.label(format!("Freq: {:.0} Hz", pointer_pos.x.exp()));
-                                    //     ui.label(format!("Gain: {:.1} dB", curve_y));
-                                    // });
-                                } else {
-                                    // self.snapped_point = None;
-                                }
-                            }
-                        });
-
-                        ui.allocate_space(Vec2::splat(2.0));
-     /*                    ui.add(
-                            egui::widgets::ProgressBar::new(plotresp.inner.y)
-                                .text(peak_meter_text),
-                        ); */
-                        
-                    });
-            },
-        )
+        let ui_data = self.ui_data.clone();
+        build_editor(params, egui_state,ui_data)
     }
 
     fn process(
@@ -437,6 +305,25 @@ impl Plugin for OpenMbc {
 
             //TODO: missing settings - side chain!
         }
+
+        //redraw filters (when allowed)
+        if let Ok(mut uidata) = self.ui_data.try_lock(){
+            uidata.reset_filter_shape();
+
+
+            for idx in 0..MAX_MBCS{
+                if self.params.comps[idx].enable.value(){
+
+
+
+                    // uidata.append_filter_shape(self.comp_filt_state[idx].filt.get_aux_filter());
+                    uidata.append_filter_shape(self.comp_filt_state[idx].filt.get_main_filter());
+                }
+            }
+
+        }
+
+
         //THIS IS STEREO!
         for channel_samples in buffer.iter_samples() {
             for sample in channel_samples {

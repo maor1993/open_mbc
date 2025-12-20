@@ -19,7 +19,7 @@ nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev="28b149ec4
     "standalone"
 ] }
 nih_plug_egui = { git = "https://codeberg.org/BillyDM/egui-baseview", branch = "main" }
-cute-dsp = { git = "https://github.com/CuteDSP/RSCuteDSP", features = ["std"] }
+cute-dsp = { git = "https://github.com/maor1993/RSCuteDSP.git", features = ["std"] }
 crossbeam = "0.8.4"
 anyhow = "1.0.100"
 
