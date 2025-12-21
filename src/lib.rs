@@ -15,11 +15,13 @@ use ui::build_editor;
 use ui::UiData;
 
 use nih_plug_egui::EguiState;
+
+use crate::ui::NUM_OF_FILTER_POINTS;
 pub struct OpenMbc {
     params: Arc<OpenMbcParams>,
     sample_rate: f32,
-    comp_filt_state: [CompFilter; MAX_MBCS], 
-    ui_data: Arc<Mutex<UiData>>
+    comp_filt_state: [CompFilter; MAX_MBCS],
+    ui_data: Arc<Mutex<UiData>>,
 }
 
 #[derive(Params)]
@@ -128,7 +130,7 @@ impl Default for CompParams {
                 "Gain",
                 util::db_to_gain(0.0),
                 FloatRange::Skewed {
-                    min: util::db_to_gain(-10.0),
+                    min: util::db_to_gain(-30.0),
                     max: util::db_to_gain(30.0),
                     factor: 0.7,
                 },
@@ -160,7 +162,7 @@ impl Default for OpenMbc {
             params: Arc::new(OpenMbcParams::default()),
             sample_rate: 0.0,
             comp_filt_state: std::array::from_fn(|_| CompFilter::default()),
-            ui_data: Arc::new(Mutex::new(UiData::default()))
+            ui_data: Arc::new(Mutex::new(UiData::default())),
         }
     }
 }
@@ -226,7 +228,12 @@ impl Plugin for OpenMbc {
         // The `reset()` function is always called right after this function. You can remove this
         // function if you do not need it.
         self.sample_rate = _buffer_config.sample_rate;
-        self.ui_data.lock().unwrap().sample_rate = self.sample_rate;
+
+        {
+            let mut uidata = self.ui_data.lock().unwrap();
+
+            uidata.sample_rate = self.sample_rate;
+        }
 
         for (idx, comp_filt) in self.comp_filt_state.iter_mut().enumerate() {
             comp_filt.filt.sample_rate = self.sample_rate;
@@ -249,7 +256,7 @@ impl Plugin for OpenMbc {
         let params = self.params.clone();
         let egui_state = params.editor_state.clone();
         let ui_data = self.ui_data.clone();
-        build_editor(params, egui_state,ui_data)
+        build_editor(params, egui_state, ui_data)
     }
 
     fn process(
@@ -258,7 +265,7 @@ impl Plugin for OpenMbc {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        let mut tot_enabled_chs = 1; //small kombina, we start with one as we always have the aux channel
+        let mut tot_enabled_chs = 0; //small kombina, we start with one as we always have the aux channel
                                      //reconfigure all states
         for (idx, comp_filt) in self.comp_filt_state.iter_mut().enumerate() {
             let this_comp = &self.params.comps[idx];
@@ -307,22 +314,71 @@ impl Plugin for OpenMbc {
         }
 
         //redraw filters (when allowed)
-        if let Ok(mut uidata) = self.ui_data.try_lock(){
-            uidata.reset_filter_shape();
+        if let Ok(mut uidata) = self.ui_data.try_lock() {
+            let mut none_enabled = true;
+            uidata.set_filter_shape(0.0);
 
+            //visualize each filter seperately
+            self.comp_filt_state
+                .iter()
+                .enumerate()
+                .for_each(|(idx, comp_filt)| {
+                    if self.params.comps[idx].enable.value() {
+                        let main_filter_mag = ui::utils::get_filter_shape(
+                            self.sample_rate,
+                            comp_filt.filt.get_main_filter(),
+                            1.0,
+                        );
+                        let aux_filter_mag = ui::utils::get_filter_shape(
+                            self.sample_rate,
+                            comp_filt.filt.get_aux_filter(),
+                            1.0,
+                        );
 
-            for idx in 0..MAX_MBCS{
-                if self.params.comps[idx].enable.value(){
+                        let mut sum_filter_mag = [0.0_f64; NUM_OF_FILTER_POINTS];
 
+                        for i in 0..NUM_OF_FILTER_POINTS {
+                            sum_filter_mag[i] = main_filter_mag[i] + aux_filter_mag[i];
+                        }
 
-
-                    // uidata.append_filter_shape(self.comp_filt_state[idx].filt.get_aux_filter());
-                    uidata.append_filter_shape(self.comp_filt_state[idx].filt.get_main_filter());
-                }
-            }
-
+                        uidata
+                            .borrow_filter_shape(3 * idx)
+                            .unwrap()
+                            .copy_from_slice(&main_filter_mag);
+                        uidata
+                            .borrow_filter_shape(3 * idx + 1)
+                            .unwrap()
+                            .copy_from_slice(&aux_filter_mag);
+                        uidata
+                            .borrow_filter_shape(3 * idx + 2)
+                            .unwrap()
+                            .copy_from_slice(&sum_filter_mag);
+                    }
+                });
         }
 
+        // self.comp_filt_state
+        //     .iter()
+        //     .enumerate()
+        //     .for_each(|(idx, comp_filt)| {
+        //         if self.params.comps[idx].enable.value() {
+        //             let aux_gain = 1.0; //we get half the power from main, half the power from aux
+        //             let main_gain = self.params.comps[idx].gain.smoothed.next() * aux_gain;
+        //             let main_filter_mag = uidata
+        //                 .get_filter_shape(comp_filt.filt.get_main_filter(), main_gain as f64);
+        //             let aux_filter_mag = uidata
+        //                 .get_filter_shape(comp_filt.filt.get_aux_filter(), aux_gain as f64);
+
+        //             for (idx, mag) in uidata.borrow_filter_shape().iter_mut().enumerate() {
+        //                 *mag = *mag  + aux_filter_mag[idx]
+        //             }
+        //         }
+        //         // else {
+        //         //     for mag in uidata.borrow_filter_shape().iter_mut() {
+        //         //         *mag = *mag + (1.0 / MAX_MBCS as f64) * 0.5
+        //         //     }
+        //         // }
+        //     });
 
         //THIS IS STEREO!
         for channel_samples in buffer.iter_samples() {
@@ -343,12 +399,14 @@ impl Plugin for OpenMbc {
 
                         //bypass
                         //TODO: maybe change this such that we don't even run the filter and compressor if not enabled, cheaper on processor
+                        //FIXME: this is wrong, we're infact summing a notched singal MAX_MBCS times
                         if self.params.comps[idx].enable.value() {
                             comp * self.params.comps[idx].gain.smoothed.next()
                                 * (1.0 / tot_enabled_chs as f32)
-                                + filt_aux * (1.0 / tot_enabled_chs as f32)
+                                * 0.5
+                                + filt_aux * (1.0 / tot_enabled_chs as f32) * 0.5
                         } else {
-                            filt_aux * (1.0 / MAX_MBCS as f32)
+                            *sample * (1.0 / MAX_MBCS as f32)
                         }
                     })
                     .sum();

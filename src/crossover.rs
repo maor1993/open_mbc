@@ -26,10 +26,14 @@ impl Crossover {
     pub fn configure(&mut self) {
         match self.mode {
             FilterType::Bandpass => {
-                self.main_filter
-                    .bandpass((self.center_freq / self.sample_rate) as f64, self.octaves  as f64);
-                self.aux_filter
-                    .notch((self.center_freq / self.sample_rate) as f64, self.octaves as f64)
+                self.main_filter.bandpass(
+                    (self.center_freq / self.sample_rate) as f64,
+                    self.octaves as f64,
+                );
+                self.aux_filter.notch(
+                    (self.center_freq / self.sample_rate) as f64,
+                    self.octaves as f64,
+                )
             }
             _ => todo!(),
         };
