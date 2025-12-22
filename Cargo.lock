@@ -814,7 +814,7 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 [[package]]
 name = "cute-dsp"
 version = "0.0.2"
-source = "git+https://github.com/maor1993/RSCuteDSP.git#e4287ac1a17066a50b0ff18c27f382f30d852eb6"
+source = "git+https://github.com/maor1993/RSCuteDSP.git#5caa60b1f53c6e2ebcc58755d92bab77ab152c02"
 dependencies = [
  "num-complex",
  "num-traits",
@@ -1329,9 +1329,9 @@ dependencies = [
 
 [[package]]
 name = "itoa"
-version = "1.0.15"
+version = "1.0.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
+checksum = "7ee5b5339afb4c41626dde77b7a611bd4f2c202b897852b4bcf5d03eddc61010"
 
 [[package]]
 name = "jack"

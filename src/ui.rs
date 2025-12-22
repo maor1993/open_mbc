@@ -17,18 +17,25 @@ use crate::MAX_MBCS;
 use crate::{FREQ_RANGE_MAX, FREQ_RANGE_MIN};
 pub const NUM_OF_FILTER_POINTS: usize = 1000; //used for visualization, might need to interpolate
 
-pub const FREQUENCIES: [f32; NUM_OF_FILTER_POINTS] = {
-    let mut arr = [0.0; NUM_OF_FILTER_POINTS];
-    let range = FREQ_RANGE_MAX - FREQ_RANGE_MIN;
-    let step = range / (NUM_OF_FILTER_POINTS as f32 - 1.0);
+use std::sync::OnceLock;
 
-    let mut i = 0;
-    while i < NUM_OF_FILTER_POINTS {
-        arr[i] = FREQ_RANGE_MIN + (i as f32) * step;
-        i += 1;
-    }
-    arr
-};
+static FREQUENCIES: OnceLock<[f64; NUM_OF_FILTER_POINTS]> = OnceLock::new();
+
+pub fn get_frequencies() -> &'static [f64; NUM_OF_FILTER_POINTS] {
+    FREQUENCIES.get_or_init(|| {
+        let mut arr = [0.0; NUM_OF_FILTER_POINTS];
+
+        // Log-spacing formula: freq = 10^(log10(min) + i * step)
+        let log_min = (FREQ_RANGE_MIN as f64).log10();
+        let log_max = (FREQ_RANGE_MAX as f64).log10();
+        let step = (log_max - log_min) / (NUM_OF_FILTER_POINTS as f64 - 1.0);
+
+        for i in 0..NUM_OF_FILTER_POINTS {
+            arr[i] = 10.0f64.powf(log_min + (i as f64) * step);
+        }
+        arr
+    })
+}
 
 pub mod utils;
 pub struct UiData {
@@ -42,7 +49,7 @@ impl Default for UiData {
         Self {
             curr_mbc_idx: 0,
             sample_rate: 0.0,
-            filter_shapes: vec![[0.0_f64; NUM_OF_FILTER_POINTS]; MAX_MBCS * 3],
+            filter_shapes: vec![[0.0_f64; NUM_OF_FILTER_POINTS]; (MAX_MBCS * 3) + 1],
         }
     }
 }
@@ -122,8 +129,6 @@ pub fn build_editor(
                         setter,
                     ));
 
-                    // }
-
                     let peak_meter = -33.0;
                     let peak_meter_text = if peak_meter > MINUS_INFINITY_DB {
                         format!("{peak_meter:.1} dBFS")
@@ -136,22 +141,54 @@ pub fn build_editor(
                         .allow_zoom(false)
                         .allow_drag(false)
                         .allow_scroll(false)
-                        .show_axes([true, true]);
+                        .show_axes([true, true])
+                        .x_grid_spacer(|input| {
+                            let mut marks = Vec::new();
+
+                            // Calculate the range of powers of 10 visible in the current view
+                            let start_pow = input.bounds.0.floor() as i32;
+                            let end_pow = input.bounds.1.ceil() as i32;
+
+                            for pow in start_pow..=end_pow {
+                                let base = 10.0f64.powi(pow);
+
+                                // Major tick (the power of 10)
+                                marks.push(egui_plot::GridMark {
+                                    value: pow as f64,
+                                    step_size: 1.0, // Used by egui to determine line thickness
+                                });
+
+                                // Minor ticks (2, 3, 4... 9 * 10^pow)
+                                // Only draw if we aren't zoomed out too far to keep the UI clean
+                                for i in 2..10 {
+                                    let val = (i as f64 * base).log10();
+                                    marks.push(egui_plot::GridMark {
+                                        value: val,
+                                        step_size: 0.1, // Thinner lines
+                                    });
+                                }
+                            }
+                            marks
+                        })
+                        .x_axis_formatter(|mark, _range| {
+                            // Convert the log value back to a readable string (e.g., 10, 100, 1000)
+                            format!("{:.0}", 10.0f64.powf(mark.value))
+                        })
+                        .label_formatter(|name, value| {
+                            format!("freq:{:.0}\nGain:{:.2}", 10.0_f64.powf(value.x), value.y)
+                        });
                     // .label_formatter(|_, _| "".to_owned()); // Disable default tooltip
                     plot.show(ui, |plot_ui| {
                         plot_ui.set_plot_bounds(egui_plot::PlotBounds::from_min_max(
-                            [FREQ_RANGE_MIN as f64, -60.0],
-                            [FREQ_RANGE_MAX as f64, 20.0],
+                            [1.0, -60.0],
+                            [(FREQ_RANGE_MAX as f64).log10(), 20.0],
                         ));
-                        // Generate line points
-                        let slope = (FREQ_RANGE_MAX - FREQ_RANGE_MIN) / NUM_OF_FILTER_POINTS as f32;
-
                         {
                             let uidata = ui_data.lock().unwrap();
                             for filter_shape in uidata.filter_shapes.iter() {
                                 let points: egui_plot::PlotPoints = (0..NUM_OF_FILTER_POINTS)
                                     .map(|i| {
-                                        let x = i as f64 * (slope as f64);
+                                        let x = get_frequencies()[i].log10();
                                         let y =
                                             nih_plug::util::gain_to_db_fast(filter_shape[i] as f32)
                                                 as f64;
@@ -186,7 +223,7 @@ pub fn build_editor(
                         }
                     });
 
-                    ui.allocate_space(Vec2::splat(2.0));
+                    ui.allocate_space(Vec2::splat(16.0));
                     /*                    ui.add(
                         egui::widgets::ProgressBar::new(plotresp.inner.y)
                             .text(peak_meter_text),

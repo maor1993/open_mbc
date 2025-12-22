@@ -1,6 +1,6 @@
 use cute_dsp::filters::Biquad;
 
-use super::FREQUENCIES;
+use super::get_frequencies;
 use super::NUM_OF_FILTER_POINTS;
 
 pub fn get_filter_shape(
@@ -11,8 +11,8 @@ pub fn get_filter_shape(
     //TODO: perhaps save normalized frequency array as well, to avoid running division for every freq
     let mut res = [0.0; NUM_OF_FILTER_POINTS];
 
-    for (idx, freq) in FREQUENCIES.iter().enumerate() {
-        res[idx] = gain * filter.get_mag_response(freq / sample_rate);
+    for (idx, freq) in get_frequencies().iter().enumerate() {
+        res[idx] = gain * filter.get_mag_response(freq / sample_rate as f64);
     }
 
     res

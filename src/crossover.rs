@@ -30,7 +30,7 @@ impl Crossover {
                     (self.center_freq / self.sample_rate) as f64,
                     self.octaves as f64,
                 );
-                self.aux_filter.notch(
+                self.aux_filter.allpass(
                     (self.center_freq / self.sample_rate) as f64,
                     self.octaves as f64,
                 )

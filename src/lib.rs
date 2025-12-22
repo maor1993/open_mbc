@@ -34,7 +34,7 @@ struct OpenMbcParams {
 }
 
 const MAX_MBCS: usize = 5;
-const FREQ_RANGE_MIN: f32 = 20.0;
+const FREQ_RANGE_MIN: f32 = 10.0;
 const FREQ_RANGE_MAX: f32 = 20_000.0;
 
 #[derive(Params)]
@@ -336,9 +336,10 @@ impl Plugin for OpenMbc {
                         );
 
                         let mut sum_filter_mag = [0.0_f64; NUM_OF_FILTER_POINTS];
-
+                        let sum_all = uidata.borrow_filter_shape(3 * MAX_MBCS).unwrap();
                         for i in 0..NUM_OF_FILTER_POINTS {
                             sum_filter_mag[i] = main_filter_mag[i] + aux_filter_mag[i];
+                            sum_all[i] += sum_filter_mag[i] / tot_enabled_chs as f64;
                         }
 
                         uidata
@@ -349,36 +350,13 @@ impl Plugin for OpenMbc {
                             .borrow_filter_shape(3 * idx + 1)
                             .unwrap()
                             .copy_from_slice(&aux_filter_mag);
-                        uidata
-                            .borrow_filter_shape(3 * idx + 2)
-                            .unwrap()
-                            .copy_from_slice(&sum_filter_mag);
+                        // uidata
+                        //     .borrow_filter_shape(3 * idx + 2)
+                        //     .unwrap()
+                        //     .copy_from_slice(&sum_filter_mag);
                     }
                 });
         }
-
-        // self.comp_filt_state
-        //     .iter()
-        //     .enumerate()
-        //     .for_each(|(idx, comp_filt)| {
-        //         if self.params.comps[idx].enable.value() {
-        //             let aux_gain = 1.0; //we get half the power from main, half the power from aux
-        //             let main_gain = self.params.comps[idx].gain.smoothed.next() * aux_gain;
-        //             let main_filter_mag = uidata
-        //                 .get_filter_shape(comp_filt.filt.get_main_filter(), main_gain as f64);
-        //             let aux_filter_mag = uidata
-        //                 .get_filter_shape(comp_filt.filt.get_aux_filter(), aux_gain as f64);
-
-        //             for (idx, mag) in uidata.borrow_filter_shape().iter_mut().enumerate() {
-        //                 *mag = *mag  + aux_filter_mag[idx]
-        //             }
-        //         }
-        //         // else {
-        //         //     for mag in uidata.borrow_filter_shape().iter_mut() {
-        //         //         *mag = *mag + (1.0 / MAX_MBCS as f64) * 0.5
-        //         //     }
-        //         // }
-        //     });
 
         //THIS IS STEREO!
         for channel_samples in buffer.iter_samples() {
