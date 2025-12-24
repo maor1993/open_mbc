@@ -1,5 +1,6 @@
 use cute_dsp::filters::FilterType;
 use nih_plug::prelude::*;
+use num_complex::Complex64;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -315,9 +316,9 @@ impl Plugin for OpenMbc {
 
         //redraw filters (when allowed)
         if let Ok(mut uidata) = self.ui_data.try_lock() {
-            let mut none_enabled = true;
             uidata.set_filter_shape(0.0);
-
+            let mut sum_all = [Complex64::new(0.0, 0.0); NUM_OF_FILTER_POINTS];
+            let mut main_filters = [[Complex64::new(0.0, 0.0); NUM_OF_FILTER_POINTS]; MAX_MBCS];
             //visualize each filter seperately
             self.comp_filt_state
                 .iter()
@@ -329,33 +330,26 @@ impl Plugin for OpenMbc {
                             comp_filt.filt.get_main_filter(),
                             1.0,
                         );
-                        let aux_filter_mag = ui::utils::get_filter_shape(
-                            self.sample_rate,
-                            comp_filt.filt.get_aux_filter(),
-                            1.0,
-                        );
 
-                        let mut sum_filter_mag = [0.0_f64; NUM_OF_FILTER_POINTS];
-                        let sum_all = uidata.borrow_filter_shape(3 * MAX_MBCS).unwrap();
-                        for i in 0..NUM_OF_FILTER_POINTS {
-                            sum_filter_mag[i] = main_filter_mag[i] + aux_filter_mag[i];
-                            sum_all[i] += sum_filter_mag[i] / tot_enabled_chs as f64;
-                        }
-
-                        uidata
-                            .borrow_filter_shape(3 * idx)
-                            .unwrap()
-                            .copy_from_slice(&main_filter_mag);
-                        uidata
-                            .borrow_filter_shape(3 * idx + 1)
-                            .unwrap()
-                            .copy_from_slice(&aux_filter_mag);
-                        // uidata
-                        //     .borrow_filter_shape(3 * idx + 2)
-                        //     .unwrap()
-                        //     .copy_from_slice(&sum_filter_mag);
+                        main_filters[idx].copy_from_slice(&main_filter_mag);
                     }
                 });
+
+            for i in 0..NUM_OF_FILTER_POINTS {
+                let sum: Complex64 = main_filters
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, x)| x[i] * self.params.comps[idx].gain.smoothed.next() as f64)
+                    .sum();
+                let sum_no_gain: Complex64 =
+                    main_filters.iter().enumerate().map(|(idx, x)| x[i]).sum();
+                sum_all[i] += 1.0 - sum_no_gain + sum;
+            }
+
+            let sum_plot = uidata.borrow_filter_shape(3 * MAX_MBCS).unwrap();
+            for i in 0..NUM_OF_FILTER_POINTS {
+                sum_plot[i] = sum_all[i].norm();
+            }
         }
 
         //THIS IS STEREO!
@@ -381,8 +375,7 @@ impl Plugin for OpenMbc {
                         if self.params.comps[idx].enable.value() {
                             comp * self.params.comps[idx].gain.smoothed.next()
                                 * (1.0 / tot_enabled_chs as f32)
-                                * 0.5
-                                + filt_aux * (1.0 / tot_enabled_chs as f32) * 0.5
+                                + filt_aux * (1.0 / tot_enabled_chs as f32)
                         } else {
                             *sample * (1.0 / MAX_MBCS as f32)
                         }

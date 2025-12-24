@@ -814,7 +814,7 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 [[package]]
 name = "cute-dsp"
 version = "0.0.2"
-source = "git+https://github.com/maor1993/RSCuteDSP.git#5caa60b1f53c6e2ebcc58755d92bab77ab152c02"
+source = "git+https://github.com/maor1993/RSCuteDSP.git#cf61c59919d5579eca9d05d34d1fd1a50596ce1d"
 dependencies = [
  "num-complex",
  "num-traits",
@@ -2091,6 +2091,7 @@ dependencies = [
  "egui_plot",
  "nih_plug",
  "nih_plug_egui",
+ "num-complex",
  "plotters",
  "wavers",
 ]
@@ -2568,9 +2569,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.145"
+version = "1.0.146"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "402a6f66d8c709116cf22f558eab210f5a50187f702eb4d7e5ef38d9a7f1c79c"
+checksum = "217ca874ae0207aac254aa02c957ded05585a90892cc8d87f9e5fa49669dadd8"
 dependencies = [
  "itoa",
  "memchr",

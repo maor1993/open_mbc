@@ -24,6 +24,7 @@ crossbeam = "0.8.4"
 anyhow = "1.0.100"
 
 egui_plot = "0.34.0"
+num-complex = "0.4.6"
 
 [dev-dependencies]
 plotters = {version = "0.3.7"}
