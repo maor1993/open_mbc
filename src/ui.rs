@@ -21,8 +21,11 @@ pub const NUM_OF_FILTER_POINTS: usize = 1000; //used for visualization, might ne
 
 use std::sync::OnceLock;
 
-pub const FREQ_RANGE_MAX_LOG10: f64 = 4.301029996_f64;
+pub const FREQ_RANGE_MAX_LOG10: f64 = 4.301029996_f64; //manually calculated.
 pub const FREQ_RANGE_MIN_LOG10: f64 = 1.0_f64;
+
+pub const MIN_POWER_DB: isize = -12;
+pub const MAX_POWER_DB: isize = 12;
 
 pub const FREQ_STEP: f64 =
     (FREQ_RANGE_MAX_LOG10 - FREQ_RANGE_MIN_LOG10) / (NUM_OF_FILTER_POINTS as f64 - 1.0);
@@ -127,35 +130,65 @@ pub fn build_editor(
 
                     // ui.label(format!("Octaves {}", idx));
 
-                    ui.horizontal(|ui| {
-                        let mut octaves = params.comps[idx].q.value();
-                        ui.add(
-                            Knob::new(&mut octaves, 0.01, 10.0, egui_knob::KnobStyle::Wiper)
-                                .with_label("Octaves", egui_knob::LabelPosition::Bottom),
-                        );
-                        update_param!(setter, &params.comps[idx].q, octaves);
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            let mut octaves = params.comps[idx].q.value();
+                            ui.add(
+                                Knob::new(&mut octaves, 0.01, 10.0, egui_knob::KnobStyle::Wiper)
+                                    .with_label("Octaves", egui_knob::LabelPosition::Bottom),
+                            );
+                            update_param!(setter, &params.comps[idx].q, octaves);
 
-                        let mut freq = params.comps[idx].center_freq.value();
-                        ui.add(
-                            Knob::new(
-                                &mut freq,
-                                FREQ_RANGE_MIN,
-                                FREQ_RANGE_MAX,
-                                egui_knob::KnobStyle::Wiper,
-                            )
-                            .with_label("Center", egui_knob::LabelPosition::Bottom),
-                        );
-                        update_param!(setter, &params.comps[idx].center_freq, freq);
+                            let mut freq = params.comps[idx].center_freq.value();
+                            ui.add(
+                                Knob::new(
+                                    &mut freq,
+                                    FREQ_RANGE_MIN,
+                                    FREQ_RANGE_MAX,
+                                    egui_knob::KnobStyle::Wiper,
+                                )
+                                .with_label("Center", egui_knob::LabelPosition::Bottom),
+                            );
+                            update_param!(setter, &params.comps[idx].center_freq, freq);
 
-                        let mut gain = params.comps[idx].gain.value();
-                        ui.add(
-                            Knob::new(&mut gain, 0.03, 30.0, egui_knob::KnobStyle::Wiper)
-                                .with_label("Gain[dB]", egui_knob::LabelPosition::Bottom)
-                                .with_label_format(|val| {
-                                    format!("{:.1}", (20.0_f32 * (val.log10())))
-                                }),
-                        );
-                        update_param!(setter, &params.comps[idx].gain, gain);
+                            let mut gain = params.comps[idx].gain.value();
+                            ui.add(
+                                Knob::new(&mut gain, 0.03, 30.0, egui_knob::KnobStyle::Wiper)
+                                    .with_label("Gain[dB]", egui_knob::LabelPosition::Bottom)
+                                    .with_label_format(|val| {
+                                        format!("{:.1}", (20.0_f32 * (val.log10())))
+                                    }),
+                            );
+                            update_param!(setter, &params.comps[idx].gain, gain);
+                        });
+                        ui.horizontal(|ui| {
+                            let mut threshold = params.comps[idx].threshold.value();
+                            ui.add(
+                                Knob::new(&mut threshold, 1e-3, 1.0, egui_knob::KnobStyle::Wiper)
+                                    .with_label("Threshold", egui_knob::LabelPosition::Bottom)
+                                    .with_label_format(|val| {
+                                        format!("{:.1}", (20.0_f32 * (val.log10())))
+                                    }),
+                            );
+                            update_param!(setter, &params.comps[idx].threshold, threshold);
+
+                            let mut ratio = params.comps[idx].ratio.value();
+                            ui.add(
+                                Knob::new(&mut ratio, 1.0, 10.0, egui_knob::KnobStyle::Wiper)
+                                    .with_label("Ratio", egui_knob::LabelPosition::Bottom),
+                            );
+                            update_param!(setter, &params.comps[idx].ratio, ratio);
+
+                            // let mut gain = params.comps[idx].gain.value();
+                            // ui.add(
+                            //     Knob::new(&mut gain, 0.03, 30.0, egui_knob::KnobStyle::Wiper)
+                            //         .with_label("Gain[dB]", egui_knob::LabelPosition::Bottom)
+                            //         .with_label_format(|val| {
+                            //             format!("{:.1}", (20.0_f32 * (val.log10())))
+                            //         }),
+                            // );
+                            // update_param!(setter, &params.comps[idx].gain, gain);
+                        })
                     });
 
                     let peak_meter = -33.0;
@@ -166,11 +199,11 @@ pub fn build_editor(
                     };
                     let peak_meter_normalized = (peak_meter + 60.0) / 60.0;
                     let plot = Plot::new("eq_plot")
-                        .height(300.0)
+                        .height(640.0)
                         .allow_zoom(false)
                         .allow_drag(false)
                         .allow_scroll(false)
-                        .show_axes([true, true])
+                        .show_axes([true, true]) 
                         .x_grid_spacer(|input| {
                             let mut marks = Vec::new();
 
@@ -209,8 +242,8 @@ pub fn build_editor(
                     // .label_formatter(|_, _| "".to_owned()); // Disable default tooltip
                     plot.show(ui, |plot_ui| {
                         plot_ui.set_plot_bounds(egui_plot::PlotBounds::from_min_max(
-                            [1.0, -60.0],
-                            [(FREQ_RANGE_MAX as f64).log10(), 60.0],
+                            [FREQ_RANGE_MIN_LOG10, MIN_POWER_DB as f64],
+                            [FREQ_RANGE_MAX_LOG10, MAX_POWER_DB as f64],
                         ));
                         {
                             let uidata = ui_data.lock().unwrap();
@@ -232,6 +265,8 @@ pub fn build_editor(
                             }
                         }
 
+
+
                         for i in 0..MAX_MBCS {
                             if params.comps[i].enable.value() {
                                 let pnt = [
@@ -245,6 +280,11 @@ pub fn build_editor(
                                         .radius(3.0)
                                         .filled(true),
                                 );
+
+
+
+                                
+
                             }
                         }
 
@@ -267,18 +307,19 @@ pub fn build_editor(
                         if plot_ui.response().dragged() {
                             let drag_delta = plot_ui.response().drag_motion();
 
-                            info!("clicked on {:?}", plot_ui.response().interact_pointer_pos());
                             let new_center_freq = 10.0_f32.powf(
                                 params.comps[EX_IDX].center_freq.value().log10()
                                     + drag_delta.x * FREQ_STEP as f32,
                             );
-                            info!("drag delta :{:?} new freq: {}", drag_delta, new_center_freq);
 
+                            let new_gain = params.comps[EX_IDX].gain.value() - drag_delta.y * 0.01;
+                            // info!("drag delta :{:?} new freq: {} new gain: {}", drag_delta, new_center_freq,new_gain);
                             update_param!(
                                 setter,
                                 &params.comps[EX_IDX].center_freq,
                                 new_center_freq
                             );
+                            update_param!(setter, &params.comps[EX_IDX].gain, new_gain);
                         }
                     });
 
