@@ -950,6 +950,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_knob"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "315a754be9706cc4696632b6b1c45955819f85309ed08018535c98e5331cccd5"
+dependencies = [
+ "egui",
+]
+
+[[package]]
 name = "egui_plot"
 version = "0.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2088,6 +2097,7 @@ dependencies = [
  "anyhow",
  "crossbeam",
  "cute-dsp",
+ "egui_knob",
  "egui_plot",
  "nih_plug",
  "nih_plug_egui",

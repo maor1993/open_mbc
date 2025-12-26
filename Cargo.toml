@@ -25,6 +25,7 @@ anyhow = "1.0.100"
 
 egui_plot = "0.34.0"
 num-complex = "0.4.6"
+egui_knob = "0.3.6"
 
 [dev-dependencies]
 plotters = {version = "0.3.7"}

@@ -1,12 +1,14 @@
 use egui_plot::Plot;
 use std::sync::{Arc, Mutex};
 
-use nih_plug::editor::Editor;
+use egui_knob::Knob;
+
+use nih_plug::{editor::Editor, log::info};
 use nih_plug_egui::{
     create_egui_editor,
     egui::{self, Vec2},
     resizable_window::ResizableWindow,
-    widgets, EguiState,
+    EguiState,
 };
 
 use nih_plug::util::MINUS_INFINITY_DB;
@@ -19,19 +21,20 @@ pub const NUM_OF_FILTER_POINTS: usize = 1000; //used for visualization, might ne
 
 use std::sync::OnceLock;
 
+pub const FREQ_RANGE_MAX_LOG10: f64 = 4.301029996_f64;
+pub const FREQ_RANGE_MIN_LOG10: f64 = 1.0_f64;
+
+pub const FREQ_STEP: f64 =
+    (FREQ_RANGE_MAX_LOG10 - FREQ_RANGE_MIN_LOG10) / (NUM_OF_FILTER_POINTS as f64 - 1.0);
+
 static FREQUENCIES: OnceLock<[f64; NUM_OF_FILTER_POINTS]> = OnceLock::new();
 
 pub fn get_frequencies() -> &'static [f64; NUM_OF_FILTER_POINTS] {
     FREQUENCIES.get_or_init(|| {
         let mut arr = [0.0; NUM_OF_FILTER_POINTS];
 
-        // Log-spacing formula: freq = 10^(log10(min) + i * step)
-        let log_min = (FREQ_RANGE_MIN as f64).log10();
-        let log_max = (FREQ_RANGE_MAX as f64).log10();
-        let step = (log_max - log_min) / (NUM_OF_FILTER_POINTS as f64 - 1.0);
-
         for i in 0..NUM_OF_FILTER_POINTS {
-            arr[i] = 10.0f64.powf(log_min + (i as f64) * step);
+            arr[i] = 10.0f64.powf(FREQ_RANGE_MIN_LOG10 + (i as f64) * FREQ_STEP);
         }
         arr
     })
@@ -80,6 +83,14 @@ impl UiData {
     //  }
 }
 
+macro_rules! update_param {
+    ($a:expr,$b:expr,$c:expr) => {
+        $a.begin_set_parameter($b);
+        $a.set_parameter($b, $c);
+        $a.end_set_parameter($b);
+    };
+}
+
 pub fn build_editor(
     params: Arc<OpenMbcParams>,
     egui_state: Arc<EguiState>,
@@ -113,21 +124,39 @@ pub fn build_editor(
                         setter.set_parameter(&params.comps[idx].enable, enable_0);
                         setter.end_set_parameter(&params.comps[idx].enable);
                     }
-                    ui.label(format!("Octaves {}", idx));
-                    ui.add(widgets::ParamSlider::for_param(
-                        &params.comps[idx].q,
-                        setter,
-                    ));
-                    ui.label(format!("center {}", idx));
-                    ui.add(widgets::ParamSlider::for_param(
-                        &params.comps[idx].center_freq,
-                        setter,
-                    ));
-                    ui.label(format!("Gain {}", idx));
-                    ui.add(widgets::ParamSlider::for_param(
-                        &params.comps[idx].gain,
-                        setter,
-                    ));
+
+                    // ui.label(format!("Octaves {}", idx));
+
+                    ui.horizontal(|ui| {
+                        let mut octaves = params.comps[idx].q.value();
+                        ui.add(
+                            Knob::new(&mut octaves, 0.01, 10.0, egui_knob::KnobStyle::Wiper)
+                                .with_label("Octaves", egui_knob::LabelPosition::Bottom),
+                        );
+                        update_param!(setter, &params.comps[idx].q, octaves);
+
+                        let mut freq = params.comps[idx].center_freq.value();
+                        ui.add(
+                            Knob::new(
+                                &mut freq,
+                                FREQ_RANGE_MIN,
+                                FREQ_RANGE_MAX,
+                                egui_knob::KnobStyle::Wiper,
+                            )
+                            .with_label("Center", egui_knob::LabelPosition::Bottom),
+                        );
+                        update_param!(setter, &params.comps[idx].center_freq, freq);
+
+                        let mut gain = params.comps[idx].gain.value();
+                        ui.add(
+                            Knob::new(&mut gain, 0.03, 30.0, egui_knob::KnobStyle::Wiper)
+                                .with_label("Gain[dB]", egui_knob::LabelPosition::Bottom)
+                                .with_label_format(|val| {
+                                    format!("{:.1}", (20.0_f32 * (val.log10())))
+                                }),
+                        );
+                        update_param!(setter, &params.comps[idx].gain, gain);
+                    });
 
                     let peak_meter = -33.0;
                     let peak_meter_text = if peak_meter > MINUS_INFINITY_DB {
@@ -181,7 +210,7 @@ pub fn build_editor(
                     plot.show(ui, |plot_ui| {
                         plot_ui.set_plot_bounds(egui_plot::PlotBounds::from_min_max(
                             [1.0, -60.0],
-                            [(FREQ_RANGE_MAX as f64).log10(), 20.0],
+                            [(FREQ_RANGE_MAX as f64).log10(), 60.0],
                         ));
                         {
                             let uidata = ui_data.lock().unwrap();
@@ -202,24 +231,54 @@ pub fn build_editor(
                                 plot_ui.line(line);
                             }
                         }
-                        // 2. Cursor Logic: Check proximity to the line
-                        if let Some(pointer_pos) = plot_ui.pointer_coordinate() {
-                            let curve_y = 0.0;
-                            let dist = (pointer_pos.y - curve_y).abs();
 
-                            // Threshold for "being on the line" in plot units
-                            // Adjust based on your Y-axis scale (Gain range)
-                            if dist < -5.0 {
-                                // self.snapped_point = Some([pointer_pos.x, curve_y]);
-                                // Draw a highlight point
-                                let highlight =
-                                    egui_plot::Points::new("", vec![[pointer_pos.x, curve_y]])
-                                        .color(egui::Color32::WHITE)
-                                        .radius(10.0);
-                                plot_ui.points(highlight);
-                            } else {
-                                // self.snapped_point = None;
+                        for i in 0..MAX_MBCS {
+                            if params.comps[i].enable.value() {
+                                let pnt = [
+                                    params.comps[i].center_freq.value().log10() as f64,
+                                    nih_plug::util::gain_to_db_fast(params.comps[i].gain.value())
+                                        as f64,
+                                ];
+
+                                plot_ui.points(
+                                    egui_plot::Points::new(format!("Filter {}", i), pnt)
+                                        .radius(3.0)
+                                        .filled(true),
+                                );
                             }
+                        }
+
+                        const EX_IDX: usize = 3;
+                        if plot_ui.response().clicked() {
+                            if let Some(mouse_pos) = plot_ui.pointer_coordinate() {
+                                if !params.comps[EX_IDX].enable.value() {
+                                    update_param!(setter, &params.comps[EX_IDX].enable, true);
+                                    update_param!(
+                                        setter,
+                                        &params.comps[EX_IDX].center_freq,
+                                        10.0_f32.powf(mouse_pos.x as f32).round()
+                                    );
+                                }
+                            }
+                        }
+
+                        //TODO: choose closest index
+
+                        if plot_ui.response().dragged() {
+                            let drag_delta = plot_ui.response().drag_motion();
+
+                            info!("clicked on {:?}", plot_ui.response().interact_pointer_pos());
+                            let new_center_freq = 10.0_f32.powf(
+                                params.comps[EX_IDX].center_freq.value().log10()
+                                    + drag_delta.x * FREQ_STEP as f32,
+                            );
+                            info!("drag delta :{:?} new freq: {}", drag_delta, new_center_freq);
+
+                            update_param!(
+                                setter,
+                                &params.comps[EX_IDX].center_freq,
+                                new_center_freq
+                            );
                         }
                     });
 
