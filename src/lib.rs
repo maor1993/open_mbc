@@ -1,4 +1,5 @@
 use cute_dsp::filters::FilterType;
+use nih_plug::log::info;
 use nih_plug::prelude::*;
 use num_complex::Complex64;
 use std::sync::Arc;
@@ -17,12 +18,17 @@ use ui::UiData;
 
 use nih_plug_egui::EguiState;
 
+use cute_dsp::stft::STFT;
+
 use crate::ui::NUM_OF_FILTER_POINTS;
+use crate::ui::NUM_OF_VIZ_FFT_POINTS;
 pub struct OpenMbc {
     params: Arc<OpenMbcParams>,
     sample_rate: f32,
     comp_filt_state: [CompFilter; MAX_MBCS],
     ui_data: Arc<Mutex<UiData>>,
+    stft_handle: STFT<f32>,
+    stft_samples_in_buf: usize,
 }
 
 #[derive(Params)]
@@ -164,6 +170,8 @@ impl Default for OpenMbc {
             sample_rate: 0.0,
             comp_filt_state: std::array::from_fn(|_| CompFilter::default()),
             ui_data: Arc::new(Mutex::new(UiData::default())),
+            stft_handle: STFT::<f32>::new(false),
+            stft_samples_in_buf: 0,
         }
     }
 }
@@ -171,7 +179,7 @@ impl Default for OpenMbc {
 impl Default for OpenMbcParams {
     fn default() -> Self {
         Self {
-            editor_state: EguiState::from_size(1024, 480),
+            editor_state: EguiState::from_size(1024, 640),
 
             comps: std::array::from_fn(|_| CompParams::default()),
         }
@@ -232,9 +240,10 @@ impl Plugin for OpenMbc {
 
         {
             let mut uidata = self.ui_data.lock().unwrap();
-
             uidata.sample_rate = self.sample_rate;
         }
+        self.stft_handle
+            .configure(1, 1, NUM_OF_VIZ_FFT_POINTS, 0, 256);
 
         for (idx, comp_filt) in self.comp_filt_state.iter_mut().enumerate() {
             comp_filt.filt.sample_rate = self.sample_rate;
@@ -350,11 +359,45 @@ impl Plugin for OpenMbc {
             for i in 0..NUM_OF_FILTER_POINTS {
                 sum_plot[i] = sum_all[i].norm();
             }
+
+            if self.stft_samples_in_buf >= NUM_OF_VIZ_FFT_POINTS {
+                let spectrum = self.stft_handle.process_block_to_spectrum(0);
+
+                for i in 0..NUM_OF_VIZ_FFT_POINTS / 2 {
+                    uidata.signal_spectrogram[i] =
+                        spectrum[i].norm() / (NUM_OF_VIZ_FFT_POINTS / 2) as f32;
+                }
+                // info!("specturm is: {:?}",uidata.signal_spectrogram);
+
+                self.stft_samples_in_buf = 0;
+                self.stft_handle.move_input(NUM_OF_VIZ_FFT_POINTS);
+            }
         }
 
         //THIS IS STEREO!
-        for channel_samples in buffer.iter_samples() {
-            for sample in channel_samples {
+        let mut buf: [f32; NUM_OF_VIZ_FFT_POINTS] = [0.0_f32; NUM_OF_VIZ_FFT_POINTS];
+
+        // const DIV: usize = 8;
+        // for i in 0..NUM_OF_VIZ_FFT_POINTS/DIV{
+        //     buf[DIV*i] = 0.1;
+        //     buf[DIV*i+1] = 0.1;
+        //     buf[DIV*i+2] = 0.1;
+        //     buf[DIV*i+3] = 0.1;
+        //     // buf[16*i+4] = 0.1;
+        //     // buf[16*i+5] = 0.1;
+        //     // buf[16*i+6] = 0.1;
+        //     // buf[16*i+7] = 0.1;
+        // }
+
+        let mut samples_to_copy = 0;
+        for (smp_idx, channel_samples) in buffer.iter_samples().enumerate() {
+            //note that we get rows here, as in each channle samples is only two samples, one for L and one for R
+            for (ch, sample) in channel_samples.into_iter().enumerate() {
+                if ch == 0 {
+                    buf[smp_idx] = *sample;
+                    samples_to_copy += 1;
+                }
+
                 // feed the signal to each filter seperately
                 let total = self
                     .comp_filt_state
@@ -386,6 +429,12 @@ impl Plugin for OpenMbc {
 
                 *sample = sample.clamp(-1.5, 1.5); //hard limit to no more than 3.5dB over
             }
+        }
+        if self.stft_samples_in_buf < NUM_OF_VIZ_FFT_POINTS {
+            // info!("s2c: {}\n buf: {:?}",samples_to_copy,buf);
+            self.stft_handle
+                .write_input(0, self.stft_samples_in_buf, samples_to_copy, &buf);
+            self.stft_samples_in_buf += samples_to_copy;
         }
 
         ProcessStatus::Normal

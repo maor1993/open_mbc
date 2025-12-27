@@ -814,7 +814,6 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 [[package]]
 name = "cute-dsp"
 version = "0.0.2"
-source = "git+https://github.com/maor1993/RSCuteDSP.git#cf61c59919d5579eca9d05d34d1fd1a50596ce1d"
 dependencies = [
  "num-complex",
  "num-traits",
@@ -961,8 +960,7 @@ dependencies = [
 [[package]]
 name = "egui_plot"
 version = "0.34.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33233ffc010fd450381805bbbebecbbb82f077de7712ddc439f0b20effd42db7"
+source = "git+https://github.com/emilk/egui_plot.git#ed3d2c23cb52344e34d0768bc9bedb56da1e31c2"
 dependencies = [
  "ahash",
  "egui",

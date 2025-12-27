@@ -1,5 +1,8 @@
 use egui_plot::Plot;
-use std::sync::{Arc, Mutex};
+use std::{
+    f32, f64,
+    sync::{Arc, Mutex},
+};
 
 use egui_knob::Knob;
 
@@ -17,14 +20,15 @@ use crate::OpenMbcParams;
 use crate::MAX_MBCS;
 
 use crate::{FREQ_RANGE_MAX, FREQ_RANGE_MIN};
-pub const NUM_OF_FILTER_POINTS: usize = 1000; //used for visualization, might need to interpolate
+pub const NUM_OF_FILTER_POINTS: usize = 1024; //used for visualization, might need to interpolate
+pub const NUM_OF_VIZ_FFT_POINTS: usize = 1024; // window size of ~20msec
 
 use std::sync::OnceLock;
 
 pub const FREQ_RANGE_MAX_LOG10: f64 = 4.301029996_f64; //manually calculated.
 pub const FREQ_RANGE_MIN_LOG10: f64 = 1.0_f64;
 
-pub const MIN_POWER_DB: isize = -12;
+pub const MIN_POWER_DB: isize = -60;
 pub const MAX_POWER_DB: isize = 12;
 
 pub const FREQ_STEP: f64 =
@@ -48,6 +52,7 @@ pub struct UiData {
     curr_mbc_idx: usize,
     pub sample_rate: f32,
     filter_shapes: Vec<[f64; NUM_OF_FILTER_POINTS]>,
+    pub signal_spectrogram: [f32; NUM_OF_VIZ_FFT_POINTS / 2],
 }
 
 impl Default for UiData {
@@ -56,6 +61,7 @@ impl Default for UiData {
             curr_mbc_idx: 0,
             sample_rate: 0.0,
             filter_shapes: vec![[0.0_f64; NUM_OF_FILTER_POINTS]; (MAX_MBCS * 3) + 1],
+            signal_spectrogram: [f32::NEG_INFINITY; NUM_OF_VIZ_FFT_POINTS / 2],
         }
     }
 }
@@ -203,7 +209,7 @@ pub fn build_editor(
                         .allow_zoom(false)
                         .allow_drag(false)
                         .allow_scroll(false)
-                        .show_axes([true, true]) 
+                        .show_axes([true, true])
                         .x_grid_spacer(|input| {
                             let mut marks = Vec::new();
 
@@ -263,9 +269,28 @@ pub fn build_editor(
                                     .width(2.0);
                                 plot_ui.line(line);
                             }
+
+                            //draw stft graph
+                            let points: egui_plot::PlotPoints = (0..NUM_OF_VIZ_FFT_POINTS / 2)
+                                .map(|i| {
+                                    let x = (uidata.sample_rate as f64 * i as f64
+                                        / NUM_OF_VIZ_FFT_POINTS as f64)
+                                        .log10();
+                                    let y = nih_plug::util::gain_to_db_fast(
+                                        uidata.signal_spectrogram[i],
+                                    );
+
+                                    [x, y as f64]
+                                })
+                                .collect();
+
+                            let line = egui_plot::Line::new("stft", points)
+                                .color(egui::Color32::from_rgb(200, 200, 200))
+                                .width(2.0)
+                                .fill(MIN_POWER_DB as f32)
+                                .fill_alpha(0.8);
+                            plot_ui.line(line);
                         }
-
-
 
                         for i in 0..MAX_MBCS {
                             if params.comps[i].enable.value() {
@@ -281,10 +306,17 @@ pub fn build_editor(
                                         .filled(true),
                                 );
 
+                                let filt_min = (params.comps[i].center_freq.value()
+                                    / 2.0_f32.powf(params.comps[i].q.value() / 2.0))
+                                    as f64;
+                                let filt_max =
+                                    filt_min * 2.0_f32.powf(params.comps[i].q.value()) as f64;
+                                let span = egui_plot::Span::new(
+                                    format!("filter {}", i),
+                                    filt_min.log10()..=filt_max.log10(),
+                                );
 
-
-                                
-
+                                plot_ui.span(span);
                             }
                         }
 

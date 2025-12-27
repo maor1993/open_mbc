@@ -28,7 +28,7 @@ impl Crossover {
                     (self.center_freq / self.sample_rate) as f64,
                     self.octaves as f64,
                 );
-                self.filters[1].allpass(
+                self.filters[1].notch(
                     (self.center_freq / self.sample_rate) as f64,
                     self.octaves as f64,
                 );

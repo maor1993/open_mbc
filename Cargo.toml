@@ -23,7 +23,7 @@ cute-dsp = { git = "https://github.com/maor1993/RSCuteDSP.git", features = ["std
 crossbeam = "0.8.4"
 anyhow = "1.0.100"
 
-egui_plot = "0.34.0"
+egui_plot = {git="https://github.com/emilk/egui_plot.git"}
 num-complex = "0.4.6"
 egui_knob = "0.3.6"
 
