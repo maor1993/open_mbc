@@ -27,8 +27,7 @@ pub struct OpenMbc {
     sample_rate: f32,
     comp_filt_state: [CompFilter; MAX_MBCS],
     ui_data: Arc<Mutex<UiData>>,
-    stft_handle: STFT<f32>,
-    stft_samples_in_buf: usize,
+    spectrum_handle: SpecturmSubSystem
 }
 
 #[derive(Params)]
@@ -68,6 +67,24 @@ struct CompParams {
 
     #[id = "gain"]
     pub gain: FloatParam,
+}
+
+struct SpecturmSubSystem{
+    pre_comp_stft_handle : STFT<f32>,
+    post_comp_stft_handle : STFT<f32>,
+    samples_in_buf : usize
+}
+
+impl SpecturmSubSystem{
+    fn new() -> Self{
+        Self { pre_comp_stft_handle: STFT::new(false), post_comp_stft_handle: STFT::new(false), samples_in_buf: 0 }
+    }
+
+    fn configure(&mut self){
+        self.pre_comp_stft_handle.configure(1, 0, NUM_OF_VIZ_FFT_POINTS, 0, NUM_OF_VIZ_FFT_POINTS/4);
+        self.post_comp_stft_handle.configure(1, 0, NUM_OF_VIZ_FFT_POINTS, 0, NUM_OF_VIZ_FFT_POINTS/4);
+    }
+
 }
 
 const DEFAULT_SMOOTHING_MSEC: f32 = 5.0;
@@ -170,8 +187,7 @@ impl Default for OpenMbc {
             sample_rate: 0.0,
             comp_filt_state: std::array::from_fn(|_| CompFilter::default()),
             ui_data: Arc::new(Mutex::new(UiData::default())),
-            stft_handle: STFT::<f32>::new(false),
-            stft_samples_in_buf: 0,
+            spectrum_handle: SpecturmSubSystem::new()
         }
     }
 }
@@ -242,8 +258,7 @@ impl Plugin for OpenMbc {
             let mut uidata = self.ui_data.lock().unwrap();
             uidata.sample_rate = self.sample_rate;
         }
-        self.stft_handle
-            .configure(1, 1, NUM_OF_VIZ_FFT_POINTS, 0, 256);
+        self.spectrum_handle.configure();
 
         for (idx, comp_filt) in self.comp_filt_state.iter_mut().enumerate() {
             comp_filt.filt.sample_rate = self.sample_rate;
@@ -360,41 +375,35 @@ impl Plugin for OpenMbc {
                 sum_plot[i] = sum_all[i].norm();
             }
 
-            if self.stft_samples_in_buf >= NUM_OF_VIZ_FFT_POINTS {
-                let spectrum = self.stft_handle.process_block_to_spectrum(0);
+            if self.spectrum_handle.samples_in_buf >= NUM_OF_VIZ_FFT_POINTS {
+                let spectrum_pre = self.spectrum_handle.pre_comp_stft_handle.process_block_to_spectrum(0);
+                let spectrum_post = self.spectrum_handle.post_comp_stft_handle.process_block_to_spectrum(0);
 
                 for i in 0..NUM_OF_VIZ_FFT_POINTS / 2 {
-                    uidata.signal_spectrogram[i] =
-                        spectrum[i].norm() / (NUM_OF_VIZ_FFT_POINTS / 2) as f32;
+                    uidata.signal_spectrogram_pre[i] =
+                        spectrum_pre[i].norm() / (NUM_OF_VIZ_FFT_POINTS / 2) as f32;
+                     uidata.signal_spectrogram_post[i] =
+                        spectrum_post[i].norm() / (NUM_OF_VIZ_FFT_POINTS / 2) as f32;
                 }
                 // info!("specturm is: {:?}",uidata.signal_spectrogram);
 
-                self.stft_samples_in_buf = 0;
-                self.stft_handle.move_input(NUM_OF_VIZ_FFT_POINTS);
+                self.spectrum_handle.samples_in_buf = 0;
+                self.spectrum_handle.pre_comp_stft_handle.move_input(NUM_OF_VIZ_FFT_POINTS);
+                self.spectrum_handle.post_comp_stft_handle.move_input(NUM_OF_VIZ_FFT_POINTS);
+
             }
         }
 
         //THIS IS STEREO!
-        let mut buf: [f32; NUM_OF_VIZ_FFT_POINTS] = [0.0_f32; NUM_OF_VIZ_FFT_POINTS];
-
-        // const DIV: usize = 8;
-        // for i in 0..NUM_OF_VIZ_FFT_POINTS/DIV{
-        //     buf[DIV*i] = 0.1;
-        //     buf[DIV*i+1] = 0.1;
-        //     buf[DIV*i+2] = 0.1;
-        //     buf[DIV*i+3] = 0.1;
-        //     // buf[16*i+4] = 0.1;
-        //     // buf[16*i+5] = 0.1;
-        //     // buf[16*i+6] = 0.1;
-        //     // buf[16*i+7] = 0.1;
-        // }
+        let mut buf_pre =[0.0_f32; NUM_OF_VIZ_FFT_POINTS];
+        let mut buf_post= [0.0_f32;NUM_OF_VIZ_FFT_POINTS];
 
         let mut samples_to_copy = 0;
         for (smp_idx, channel_samples) in buffer.iter_samples().enumerate() {
             //note that we get rows here, as in each channle samples is only two samples, one for L and one for R
             for (ch, sample) in channel_samples.into_iter().enumerate() {
                 if ch == 0 {
-                    buf[smp_idx] = *sample;
+                    buf_pre[smp_idx] = *sample;
                     samples_to_copy += 1;
                 }
 
@@ -428,13 +437,19 @@ impl Plugin for OpenMbc {
                 *sample = total;
 
                 *sample = sample.clamp(-1.5, 1.5); //hard limit to no more than 3.5dB over
+                if ch == 0{
+                    buf_post[smp_idx] = *sample;
+
+                }
             }
         }
-        if self.stft_samples_in_buf < NUM_OF_VIZ_FFT_POINTS {
+        if self.spectrum_handle.samples_in_buf < NUM_OF_VIZ_FFT_POINTS {
             // info!("s2c: {}\n buf: {:?}",samples_to_copy,buf);
-            self.stft_handle
-                .write_input(0, self.stft_samples_in_buf, samples_to_copy, &buf);
-            self.stft_samples_in_buf += samples_to_copy;
+            self.spectrum_handle.pre_comp_stft_handle
+                .write_input(0, self.spectrum_handle.samples_in_buf, samples_to_copy, &buf_pre);
+                self.spectrum_handle.post_comp_stft_handle
+                .write_input(0, self.spectrum_handle.samples_in_buf, samples_to_copy, &buf_post);
+            self.spectrum_handle.samples_in_buf += samples_to_copy;
         }
 
         ProcessStatus::Normal

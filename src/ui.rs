@@ -52,7 +52,8 @@ pub struct UiData {
     curr_mbc_idx: usize,
     pub sample_rate: f32,
     filter_shapes: Vec<[f64; NUM_OF_FILTER_POINTS]>,
-    pub signal_spectrogram: [f32; NUM_OF_VIZ_FFT_POINTS / 2],
+    pub signal_spectrogram_pre: [f32; NUM_OF_VIZ_FFT_POINTS / 2],
+    pub signal_spectrogram_post: [f32; NUM_OF_VIZ_FFT_POINTS / 2],
 }
 
 impl Default for UiData {
@@ -61,7 +62,8 @@ impl Default for UiData {
             curr_mbc_idx: 0,
             sample_rate: 0.0,
             filter_shapes: vec![[0.0_f64; NUM_OF_FILTER_POINTS]; (MAX_MBCS * 3) + 1],
-            signal_spectrogram: [f32::NEG_INFINITY; NUM_OF_VIZ_FFT_POINTS / 2],
+            signal_spectrogram_pre: [f32::NEG_INFINITY; NUM_OF_VIZ_FFT_POINTS / 2],
+            signal_spectrogram_post: [f32::NEG_INFINITY; NUM_OF_VIZ_FFT_POINTS/ 2]
         }
     }
 }
@@ -271,25 +273,51 @@ pub fn build_editor(
                             }
 
                             //draw stft graph
-                            let points: egui_plot::PlotPoints = (0..NUM_OF_VIZ_FFT_POINTS / 2)
-                                .map(|i| {
-                                    let x = (uidata.sample_rate as f64 * i as f64
+
+                            let fft_freqs:[f64;NUM_OF_VIZ_FFT_POINTS/2] = std::array::from_fn(|i| (uidata.sample_rate as f64 * i as f64
                                         / NUM_OF_VIZ_FFT_POINTS as f64)
-                                        .log10();
+                                        .log10());
+
+
+                            let points_pre: egui_plot::PlotPoints = (0..NUM_OF_VIZ_FFT_POINTS / 2)
+                                .map(|i| {
+                                    let x = fft_freqs[i];
                                     let y = nih_plug::util::gain_to_db_fast(
-                                        uidata.signal_spectrogram[i],
+                                        uidata.signal_spectrogram_pre[i],
                                     );
 
                                     [x, y as f64]
                                 })
                                 .collect();
 
-                            let line = egui_plot::Line::new("stft", points)
+                            let points_post: egui_plot::PlotPoints = (0..NUM_OF_VIZ_FFT_POINTS / 2)
+                                .map(|i| {
+                                    let x = fft_freqs[i];
+                                    let y = nih_plug::util::gain_to_db_fast(
+                                        uidata.signal_spectrogram_post[i],
+                                    );
+
+                                    [x, y as f64]
+                                })
+                                .collect();
+
+
+
+                            let line = egui_plot::Line::new("stft_pre", points_pre)
                                 .color(egui::Color32::from_rgb(200, 200, 200))
                                 .width(2.0)
-                                .fill(MIN_POWER_DB as f32)
+                                // .fill(MIN_POWER_DB as f32)
                                 .fill_alpha(0.8);
                             plot_ui.line(line);
+
+                                                        let line = egui_plot::Line::new("stft_post", points_post)
+                                .color(egui::Color32::from_rgb( 200, 10, 20))
+                                .width(1.0)
+                                // .fill(MIN_POWER_DB as f32)
+                                .fill_alpha(0.8);
+                            plot_ui.line(line);
+
+
                         }
 
                         for i in 0..MAX_MBCS {
