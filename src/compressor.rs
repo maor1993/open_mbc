@@ -11,7 +11,7 @@ use crate::compressor::{models::CompressionEmulationEnum, process::CurveType};
 pub struct Compressor {
     bypass: bool,
     curr_reduction: f32,
-    curr_reduction_post_model: f32,
+    pub curr_reduction_post_model: f32,
     makeup_gain_db: f32,
     curve_type: CurveType,
     compressor_model: CompressionEmulationEnum,

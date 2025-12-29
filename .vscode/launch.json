@@ -15,7 +15,8 @@
             "name": "Launch",
             "program": "${workspaceFolder}/target/debug/open_mbc",
             "args": [],
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "rust: cargo build (debug)"
         }
     ]
 }

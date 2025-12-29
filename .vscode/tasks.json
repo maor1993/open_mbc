@@ -15,7 +15,18 @@
 				"$rustc"
 			],
 			"group": "build",
-			"label": "rust: cargo build"
+			"label": "bundle plugin"
+		},
+
+		{
+			"type": "cargo",
+			"command": "build",
+
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build",
+			"label": "rust: cargo build (debug)"
 		}
 	]
 }

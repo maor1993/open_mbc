@@ -1,6 +1,7 @@
 use cute_dsp::filters::FilterType;
 use nih_plug::log::info;
 use nih_plug::prelude::*;
+use nih_plug::util::gain_to_db_fast;
 use num_complex::Complex64;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -27,7 +28,7 @@ pub struct OpenMbc {
     sample_rate: f32,
     comp_filt_state: [CompFilter; MAX_MBCS],
     ui_data: Arc<Mutex<UiData>>,
-    spectrum_handle: SpecturmSubSystem
+    spectrum_handle: SpecturmSubSystem,
 }
 
 #[derive(Params)]
@@ -69,25 +70,40 @@ struct CompParams {
     pub gain: FloatParam,
 }
 
-struct SpecturmSubSystem{
-    pre_comp_stft_handle : STFT<f32>,
-    post_comp_stft_handle : STFT<f32>,
-    samples_in_buf : usize
+struct SpecturmSubSystem {
+    pre_comp_stft_handle: STFT<f32>,
+    post_comp_stft_handle: STFT<f32>,
+    samples_in_buf: usize,
 }
 
-impl SpecturmSubSystem{
-    fn new() -> Self{
-        Self { pre_comp_stft_handle: STFT::new(false), post_comp_stft_handle: STFT::new(false), samples_in_buf: 0 }
+impl SpecturmSubSystem {
+    fn new() -> Self {
+        Self {
+            pre_comp_stft_handle: STFT::new(false),
+            post_comp_stft_handle: STFT::new(false),
+            samples_in_buf: 0,
+        }
     }
 
-    fn configure(&mut self){
-        self.pre_comp_stft_handle.configure(1, 0, NUM_OF_VIZ_FFT_POINTS, 0, NUM_OF_VIZ_FFT_POINTS/4);
-        self.post_comp_stft_handle.configure(1, 0, NUM_OF_VIZ_FFT_POINTS, 0, NUM_OF_VIZ_FFT_POINTS/4);
+    fn configure(&mut self) {
+        self.pre_comp_stft_handle.configure(
+            1,
+            0,
+            NUM_OF_VIZ_FFT_POINTS,
+            0,
+            NUM_OF_VIZ_FFT_POINTS / 4,
+        );
+        self.post_comp_stft_handle.configure(
+            1,
+            0,
+            NUM_OF_VIZ_FFT_POINTS,
+            0,
+            NUM_OF_VIZ_FFT_POINTS / 4,
+        );
     }
-
 }
 
-const DEFAULT_SMOOTHING_MSEC: f32 = 5.0;
+const DEFAULT_SMOOTHING_MSEC: f32 = 50.0;
 impl Default for CompParams {
     fn default() -> Self {
         Self {
@@ -100,7 +116,7 @@ impl Default for CompParams {
                     max: FREQ_RANGE_MAX,
                 },
             )
-            .with_smoother(SmoothingStyle::Linear(DEFAULT_SMOOTHING_MSEC)),
+            .with_smoother(SmoothingStyle::Logarithmic(DEFAULT_SMOOTHING_MSEC)),
             ratio: FloatParam::new(
                 "Ratio",
                 1.0,
@@ -140,7 +156,7 @@ impl Default for CompParams {
                     max: 1000.0,
                 },
             )
-            .with_smoother(SmoothingStyle::Linear(DEFAULT_SMOOTHING_MSEC)),
+            .with_smoother(SmoothingStyle::Logarithmic(DEFAULT_SMOOTHING_MSEC)),
             release: FloatParam::new(
                 "Release",
                 100.0,
@@ -187,7 +203,7 @@ impl Default for OpenMbc {
             sample_rate: 0.0,
             comp_filt_state: std::array::from_fn(|_| CompFilter::default()),
             ui_data: Arc::new(Mutex::new(UiData::default())),
-            spectrum_handle: SpecturmSubSystem::new()
+            spectrum_handle: SpecturmSubSystem::new(),
         }
     }
 }
@@ -267,6 +283,10 @@ impl Plugin for OpenMbc {
             comp_filt.filt.configure();
 
             comp_filt.comp.update_sample_rate(self.sample_rate);
+            //TODO: might need to remove this as this will destroy user settings if sample rate is updated
+            comp_filt.comp.solver.update_attack(5.0);
+            comp_filt.comp.solver.update_release(100.0);
+            comp_filt.comp.solver.update_ratio(1.0);
         }
 
         true
@@ -290,53 +310,12 @@ impl Plugin for OpenMbc {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        let mut tot_enabled_chs = 0; //small kombina, we start with one as we always have the aux channel
-                                     //reconfigure all states
-        for (idx, comp_filt) in self.comp_filt_state.iter_mut().enumerate() {
-            let this_comp = &self.params.comps[idx];
-
-            if this_comp.enable.value() {
-                tot_enabled_chs += 1;
-            }
-
-            // handle bpf update
-            if (this_comp.center_freq.smoothed.is_smoothing())
-                || (this_comp.q.smoothed.is_smoothing())
-            {
-                comp_filt.filt.center_freq = this_comp.center_freq.smoothed.next();
-                comp_filt.filt.octaves = this_comp.q.smoothed.next();
-                comp_filt.filt.configure();
-            }
-
-            // handle comp update
-            if this_comp.attack.smoothed.is_smoothing() {
-                comp_filt
-                    .comp
-                    .solver
-                    .update_attack(this_comp.attack.smoothed.next());
-            }
-
-            if this_comp.release.smoothed.is_smoothing() {
-                comp_filt
-                    .comp
-                    .solver
-                    .update_release(this_comp.release.smoothed.next());
-            }
-
-            if this_comp.ratio.smoothed.is_smoothing() {
-                comp_filt
-                    .comp
-                    .solver
-                    .update_ratio(this_comp.ratio.smoothed.next());
-            }
-            if this_comp.threshold.smoothed.is_smoothing() {
-                comp_filt.comp.solver.threshold = this_comp.threshold.smoothed.next();
-            }
-
-            //TODO: missing params - makeup gain, knee width, compressor type
-
-            //TODO: missing settings - side chain!
-        }
+        let tot_enabled_chs: usize = self
+            .params
+            .comps
+            .iter()
+            .filter(|x| x.enable.value())
+            .count();
 
         //redraw filters (when allowed)
         if let Ok(mut uidata) = self.ui_data.try_lock() {
@@ -375,80 +354,138 @@ impl Plugin for OpenMbc {
                 sum_plot[i] = sum_all[i].norm();
             }
 
+            for i in 0..MAX_MBCS {
+                uidata.gain_reduction[i] = self.comp_filt_state[i].comp.curr_reduction_post_model;
+            }
+
             if self.spectrum_handle.samples_in_buf >= NUM_OF_VIZ_FFT_POINTS {
-                let spectrum_pre = self.spectrum_handle.pre_comp_stft_handle.process_block_to_spectrum(0);
-                let spectrum_post = self.spectrum_handle.post_comp_stft_handle.process_block_to_spectrum(0);
+                let spectrum_pre = self
+                    .spectrum_handle
+                    .pre_comp_stft_handle
+                    .process_block_to_spectrum(0);
+                let spectrum_post = self
+                    .spectrum_handle
+                    .post_comp_stft_handle
+                    .process_block_to_spectrum(0);
 
                 for i in 0..NUM_OF_VIZ_FFT_POINTS / 2 {
                     uidata.signal_spectrogram_pre[i] =
                         spectrum_pre[i].norm() / (NUM_OF_VIZ_FFT_POINTS / 2) as f32;
-                     uidata.signal_spectrogram_post[i] =
+                    uidata.signal_spectrogram_post[i] =
                         spectrum_post[i].norm() / (NUM_OF_VIZ_FFT_POINTS / 2) as f32;
                 }
                 // info!("specturm is: {:?}",uidata.signal_spectrogram);
 
                 self.spectrum_handle.samples_in_buf = 0;
-                self.spectrum_handle.pre_comp_stft_handle.move_input(NUM_OF_VIZ_FFT_POINTS);
-                self.spectrum_handle.post_comp_stft_handle.move_input(NUM_OF_VIZ_FFT_POINTS);
-
+                self.spectrum_handle
+                    .pre_comp_stft_handle
+                    .move_input(NUM_OF_VIZ_FFT_POINTS);
+                self.spectrum_handle
+                    .post_comp_stft_handle
+                    .move_input(NUM_OF_VIZ_FFT_POINTS);
             }
         }
 
-        //THIS IS STEREO!
-        let mut buf_pre =[0.0_f32; NUM_OF_VIZ_FFT_POINTS];
-        let mut buf_post= [0.0_f32;NUM_OF_VIZ_FFT_POINTS];
+        let mut buf_pre = [0.0_f32; NUM_OF_VIZ_FFT_POINTS];
+        let mut buf_post = [0.0_f32; NUM_OF_VIZ_FFT_POINTS];
 
         let mut samples_to_copy = 0;
+        //TODO: THIS IS STEREO!
         for (smp_idx, channel_samples) in buffer.iter_samples().enumerate() {
             //note that we get rows here, as in each channle samples is only two samples, one for L and one for R
             for (ch, sample) in channel_samples.into_iter().enumerate() {
+                // we let this run in the sample loop due to the way smoothing works, however, we might need to trick smoother
+                // if we don't want to spend a lot of time each sample to reconfigure blocks
+                for (idx, comp_filt) in self.comp_filt_state.iter_mut().enumerate() {
+                    let this_comp_params = &self.params.comps[idx];
+
+                    // handle bpf update
+                    if (this_comp_params.center_freq.smoothed.is_smoothing())
+                        || (this_comp_params.q.smoothed.is_smoothing())
+                    {
+                        comp_filt.filt.center_freq = this_comp_params.center_freq.smoothed.next();
+                        comp_filt.filt.octaves = this_comp_params.q.smoothed.next();
+                        // comp_filt.filt.reset();
+                        comp_filt.filt.configure();
+                    }
+
+                    // handle comp update
+                    if this_comp_params.attack.smoothed.is_smoothing() {
+                        comp_filt
+                            .comp
+                            .solver
+                            .update_attack(this_comp_params.attack.smoothed.next());
+                    }
+
+                    if this_comp_params.release.smoothed.is_smoothing() {
+                        comp_filt
+                            .comp
+                            .solver
+                            .update_release(this_comp_params.release.smoothed.next());
+                    }
+
+                    if this_comp_params.ratio.smoothed.is_smoothing() {
+                        comp_filt
+                            .comp
+                            .solver
+                            .update_ratio(this_comp_params.ratio.smoothed.next());
+                    }
+                    if this_comp_params.threshold.smoothed.is_smoothing() {
+                        comp_filt.comp.solver.threshold =
+                            gain_to_db_fast(this_comp_params.threshold.smoothed.next());
+                    }
+
+                    //TODO: missing params - makeup gain, knee width, compressor type
+
+                    //TODO: missing settings - side chain!
+                }
+
                 if ch == 0 {
                     buf_pre[smp_idx] = *sample;
                     samples_to_copy += 1;
-                }
 
-                // feed the signal to each filter seperately
-                let total = self
-                    .comp_filt_state
-                    .iter_mut()
-                    .enumerate()
-                    .map(|(idx, comp_filt)| {
-                        let this_comp_params = &self.params.comps[idx];
+                    let mut total_crossover = 0.0;
+                    let mut total_filt_comp = 0.0;
 
-                        //filter
-                        let (filt_main, filt_aux) = comp_filt.filt.process(*sample);
+                    for i in 0..MAX_MBCS {
+                        if self.params.comps[i].enable.value() {
+                            let comp_filt = &mut self.comp_filt_state[i];
 
-                        //compress
-                        let comp = comp_filt.comp.process(filt_main, None);
+                            //filter
+                            let (filt_main, filt_aux) = comp_filt.filt.process(*sample);
 
-                        //bypass
-                        //TODO: maybe change this such that we don't even run the filter and compressor if not enabled, cheaper on processor
-                        //FIXME: this is wrong, we're infact summing a notched singal MAX_MBCS times
-                        if self.params.comps[idx].enable.value() {
-                            comp * self.params.comps[idx].gain.smoothed.next()
-                                * (1.0 / tot_enabled_chs as f32)
-                                + filt_aux * (1.0 / tot_enabled_chs as f32)
-                        } else {
-                            *sample * (1.0 / MAX_MBCS as f32)
+                            //compress
+                            let comp = comp_filt.comp.process(filt_main, None);
+
+                            total_crossover += filt_main;
+                            total_filt_comp += comp * self.params.comps[i].gain.smoothed.next();
                         }
-                    })
-                    .sum();
+                    }
 
-                *sample = total;
+                    let total_output = total_filt_comp + *sample - total_crossover;
 
-                *sample = sample.clamp(-1.5, 1.5); //hard limit to no more than 3.5dB over
-                if ch == 0{
+
+                    *sample = total_output;
+
+                    *sample = sample.clamp(-1.5, 1.5); //hard limit to no more than 3.5dB over
                     buf_post[smp_idx] = *sample;
-
                 }
             }
         }
         if self.spectrum_handle.samples_in_buf < NUM_OF_VIZ_FFT_POINTS {
             // info!("s2c: {}\n buf: {:?}",samples_to_copy,buf);
-            self.spectrum_handle.pre_comp_stft_handle
-                .write_input(0, self.spectrum_handle.samples_in_buf, samples_to_copy, &buf_pre);
-                self.spectrum_handle.post_comp_stft_handle
-                .write_input(0, self.spectrum_handle.samples_in_buf, samples_to_copy, &buf_post);
+            self.spectrum_handle.pre_comp_stft_handle.write_input(
+                0,
+                self.spectrum_handle.samples_in_buf,
+                samples_to_copy,
+                &buf_pre,
+            );
+            self.spectrum_handle.post_comp_stft_handle.write_input(
+                0,
+                self.spectrum_handle.samples_in_buf,
+                samples_to_copy,
+                &buf_post,
+            );
             self.spectrum_handle.samples_in_buf += samples_to_copy;
         }
 

@@ -9,7 +9,7 @@ use egui_knob::Knob;
 use nih_plug::{editor::Editor, log::info};
 use nih_plug_egui::{
     create_egui_editor,
-    egui::{self, Vec2},
+    egui::{self, widgets::ProgressBar, Vec2},
     resizable_window::ResizableWindow,
     EguiState,
 };
@@ -54,6 +54,7 @@ pub struct UiData {
     filter_shapes: Vec<[f64; NUM_OF_FILTER_POINTS]>,
     pub signal_spectrogram_pre: [f32; NUM_OF_VIZ_FFT_POINTS / 2],
     pub signal_spectrogram_post: [f32; NUM_OF_VIZ_FFT_POINTS / 2],
+    pub gain_reduction: [f32; MAX_MBCS],
 }
 
 impl Default for UiData {
@@ -63,7 +64,8 @@ impl Default for UiData {
             sample_rate: 0.0,
             filter_shapes: vec![[0.0_f64; NUM_OF_FILTER_POINTS]; (MAX_MBCS * 3) + 1],
             signal_spectrogram_pre: [f32::NEG_INFINITY; NUM_OF_VIZ_FFT_POINTS / 2],
-            signal_spectrogram_post: [f32::NEG_INFINITY; NUM_OF_VIZ_FFT_POINTS/ 2]
+            signal_spectrogram_post: [f32::NEG_INFINITY; NUM_OF_VIZ_FFT_POINTS / 2],
+            gain_reduction: [0.0_f32; MAX_MBCS],
         }
     }
 }
@@ -96,9 +98,11 @@ impl UiData {
 
 macro_rules! update_param {
     ($a:expr,$b:expr,$c:expr) => {
-        $a.begin_set_parameter($b);
-        $a.set_parameter($b, $c);
-        $a.end_set_parameter($b);
+        if $b.value() != $c {
+            $a.begin_set_parameter($b);
+            $a.set_parameter($b, $c);
+            $a.end_set_parameter($b);
+        }
     };
 }
 
@@ -119,26 +123,31 @@ pub fn build_editor(
                     ui.heading("Open Multi Band Compressor");
 
                     let last_idx = ui_data.lock().unwrap().curr_mbc_idx;
+
                     let mut idx = last_idx;
                     ui.add(egui::widgets::Slider::new(&mut idx, 0..=MAX_MBCS - 1));
 
                     if idx != last_idx {
                         ui_data.lock().unwrap().curr_mbc_idx = idx;
                     }
+                    //TODO: currently we're locking and unlocking many times, might need to be more efficient here.
+                    let curr_gain_reduction = ui_data.lock().unwrap().gain_reduction.clone();
 
                     // for idx in 0..MAX_MBCS{
                     let mut enable_0 = params.comps[idx].enable.value();
                     ui.checkbox(&mut enable_0, format!("Enable {}", idx));
-
-                    if params.comps[idx].enable.value() != enable_0 {
-                        setter.begin_set_parameter(&params.comps[idx].enable);
-                        setter.set_parameter(&params.comps[idx].enable, enable_0);
-                        setter.end_set_parameter(&params.comps[idx].enable);
-                    }
+                    update_param!(setter, &params.comps[idx].enable, enable_0);
 
                     // ui.label(format!("Octaves {}", idx));
 
                     ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                ProgressBar::new((60.0 - curr_gain_reduction[idx]) / 60.0)
+                                    .show_percentage()
+                                    .text("reduction"),
+                            );
+                        });
                         ui.horizontal(|ui| {
                             let mut octaves = params.comps[idx].q.value();
                             ui.add(
@@ -199,13 +208,6 @@ pub fn build_editor(
                         })
                     });
 
-                    let peak_meter = -33.0;
-                    let peak_meter_text = if peak_meter > MINUS_INFINITY_DB {
-                        format!("{peak_meter:.1} dBFS")
-                    } else {
-                        String::from("-inf dBFS")
-                    };
-                    let peak_meter_normalized = (peak_meter + 60.0) / 60.0;
                     let plot = Plot::new("eq_plot")
                         .height(640.0)
                         .allow_zoom(false)
@@ -274,10 +276,12 @@ pub fn build_editor(
 
                             //draw stft graph
 
-                            let fft_freqs:[f64;NUM_OF_VIZ_FFT_POINTS/2] = std::array::from_fn(|i| (uidata.sample_rate as f64 * i as f64
+                            let fft_freqs: [f64; NUM_OF_VIZ_FFT_POINTS / 2] =
+                                std::array::from_fn(|i| {
+                                    (uidata.sample_rate as f64 * i as f64
                                         / NUM_OF_VIZ_FFT_POINTS as f64)
-                                        .log10());
-
+                                        .log10()
+                                });
 
                             let points_pre: egui_plot::PlotPoints = (0..NUM_OF_VIZ_FFT_POINTS / 2)
                                 .map(|i| {
@@ -301,8 +305,6 @@ pub fn build_editor(
                                 })
                                 .collect();
 
-
-
                             let line = egui_plot::Line::new("stft_pre", points_pre)
                                 .color(egui::Color32::from_rgb(200, 200, 200))
                                 .width(2.0)
@@ -310,14 +312,12 @@ pub fn build_editor(
                                 .fill_alpha(0.8);
                             plot_ui.line(line);
 
-                                                        let line = egui_plot::Line::new("stft_post", points_post)
-                                .color(egui::Color32::from_rgb( 200, 10, 20))
+                            let line = egui_plot::Line::new("stft_post", points_post)
+                                .color(egui::Color32::from_rgb(200, 10, 20))
                                 .width(1.0)
                                 // .fill(MIN_POWER_DB as f32)
                                 .fill_alpha(0.8);
                             plot_ui.line(line);
-
-
                         }
 
                         for i in 0..MAX_MBCS {

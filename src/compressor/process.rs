@@ -7,9 +7,9 @@ pub fn run_alpha_beta(coeff: f32, prev_val: f32, new_val: f32) -> f32 {
 
 #[derive(Default, Debug)]
 pub enum CurveType {
-    #[default]
     LogLin,
     LogSmoothDecoupled,
+    #[default]
     LogSmoothBranching,
 }
 
