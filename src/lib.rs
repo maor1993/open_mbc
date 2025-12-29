@@ -103,7 +103,7 @@ impl SpecturmSubSystem {
     }
 }
 
-const DEFAULT_SMOOTHING_MSEC: f32 = 50.0;
+const DEFAULT_SMOOTHING_MSEC: f32 = 5.0;
 impl Default for CompParams {
     fn default() -> Self {
         Self {
@@ -156,7 +156,7 @@ impl Default for CompParams {
                     max: 1000.0,
                 },
             )
-            .with_smoother(SmoothingStyle::Logarithmic(DEFAULT_SMOOTHING_MSEC)),
+            .with_smoother(SmoothingStyle::Linear(DEFAULT_SMOOTHING_MSEC)),
             release: FloatParam::new(
                 "Release",
                 100.0,
@@ -338,20 +338,25 @@ impl Plugin for OpenMbc {
                     }
                 });
 
-            for i in 0..NUM_OF_FILTER_POINTS {
-                let sum: Complex64 = main_filters
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, x)| x[i] * self.params.comps[idx].gain.smoothed.next() as f64)
-                    .sum();
-                let sum_no_gain: Complex64 =
-                    main_filters.iter().enumerate().map(|(idx, x)| x[i]).sum();
-                sum_all[i] += 1.0 - sum_no_gain + sum;
-            }
-
             let sum_plot = uidata.borrow_filter_shape(3 * MAX_MBCS).unwrap();
             for i in 0..NUM_OF_FILTER_POINTS {
-                sum_plot[i] = sum_all[i].norm();
+                let mut h_total_filtered = Complex64::ZERO;
+                let mut h_static_sum = Complex64::ZERO;
+
+                for (idx, comp_filt) in self.comp_filt_state.iter().enumerate() {
+                    //TODO: all of these enables should be downstreamed to the struct and read from there.
+                    if self.params.comps[idx].enable.value() {
+                        h_total_filtered += main_filters[idx][i]
+                            * (nih_plug::util::db_to_gain_fast(
+                                -comp_filt.comp.curr_reduction_post_model,
+                            ) as f64)
+                            * self.params.comps[idx].gain.smoothed.next() as f64;
+                        h_static_sum += main_filters[idx][i]
+                    }
+
+                    sum_plot[i] =
+                        (Complex64::new(1.0, 0.0) - h_static_sum + h_total_filtered).norm();
+                }
             }
 
             for i in 0..MAX_MBCS {
@@ -438,6 +443,7 @@ impl Plugin for OpenMbc {
                     //TODO: missing params - makeup gain, knee width, compressor type
 
                     //TODO: missing settings - side chain!
+                    //TODO: missing settings - solo
                 }
 
                 if ch == 0 {
@@ -463,7 +469,6 @@ impl Plugin for OpenMbc {
                     }
 
                     let total_output = total_filt_comp + *sample - total_crossover;
-
 
                     *sample = total_output;
 
