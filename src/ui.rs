@@ -140,12 +140,13 @@ pub fn build_editor(
 
                     // ui.label(format!("Octaves {}", idx));
 
-                    ui.vertical(|ui| {
+                    ui.vertical_centered_justified(|ui| {
                         ui.horizontal(|ui| {
                             ui.add(
                                 ProgressBar::new((60.0 - curr_gain_reduction[idx]) / 60.0)
                                     .show_percentage()
-                                    .text("reduction"),
+                                    .text("reduction")
+                                    .desired_width(300.0),
                             );
                         });
                         ui.horizontal(|ui| {
@@ -196,6 +197,12 @@ pub fn build_editor(
                             );
                             update_param!(setter, &params.comps[idx].ratio, ratio);
 
+                            let mut sidechain = params.comps[idx].sidechain.value();
+
+                            ui.add(egui::widgets::Checkbox::new(&mut sidechain, "sidechain"));
+
+                            update_param!(setter, &params.comps[idx].sidechain, sidechain);
+
                             // let mut gain = params.comps[idx].gain.value();
                             // ui.add(
                             //     Knob::new(&mut gain, 0.03, 30.0, egui_knob::KnobStyle::Wiper)
@@ -205,6 +212,23 @@ pub fn build_editor(
                             //         }),
                             // );
                             // update_param!(setter, &params.comps[idx].gain, gain);
+                        })
+                    });
+                    ui.vertical_centered_justified(|ui| {
+                        ui.horizontal(|ui| {
+                            let mut checked = params.mid_side.value();
+
+                            ui.add(egui::widgets::Checkbox::new(&mut checked, "mid-side"));
+
+                            update_param!(setter, &params.mid_side, checked);
+
+                            let mut stereo_mix = params.stereo_mix.value();
+                            ui.add(
+                                Knob::new(&mut stereo_mix, 0.0, 1.0, egui_knob::KnobStyle::Wiper)
+                                    .with_label("Stereo Mix", egui_knob::LabelPosition::Bottom)
+                                    .with_label_format(|val| format!("{:.1}%", val * 100.0)),
+                            );
+                            update_param!(setter, &params.stereo_mix, stereo_mix);
                         })
                     });
 

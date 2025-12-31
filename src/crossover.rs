@@ -28,7 +28,7 @@ impl Crossover {
                     (self.center_freq / self.sample_rate) as f64,
                     self.octaves as f64,
                 );
-                self.filters[1].notch(
+                self.filters[1].bandpass(
                     (self.center_freq / self.sample_rate) as f64,
                     self.octaves as f64,
                 );
@@ -37,11 +37,14 @@ impl Crossover {
         };
     }
 
-    pub fn process(&mut self, sample: f32) -> (f32, f32) {
+    pub fn process(&mut self, sample: f32,sc:Option<f32>) -> (f32, Option<f32>) {
         let main = self.filters[0].process(sample as f64) as f32;
-        let aux = sample - main;
-
-        (main, aux)
+    
+        match sc {
+            Some(smp) => (main,Some(self.filters[1].process(smp as f64) as f32)),
+            None => (main,None)
+        }
+        
     }
 
     pub fn get_main_filter(&self) -> &Biquad<f64> {

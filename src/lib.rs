@@ -26,7 +26,7 @@ use crate::ui::NUM_OF_VIZ_FFT_POINTS;
 pub struct OpenMbc {
     params: Arc<OpenMbcParams>,
     sample_rate: f32,
-    comp_filt_state: [CompFilter; MAX_MBCS],
+    comp_filt_state: [[CompFilter; 2]; MAX_MBCS], //stereo channel per compressor
     ui_data: Arc<Mutex<UiData>>,
     spectrum_handle: SpecturmSubSystem,
 }
@@ -38,6 +38,12 @@ struct OpenMbcParams {
 
     #[nested(array, group = "Comps")]
     pub comps: [CompParams; MAX_MBCS],
+
+    #[id = "stereo_mix"]
+    pub stereo_mix: FloatParam,
+
+    #[id = "mid_side"]
+    pub mid_side: BoolParam,
 }
 
 const MAX_MBCS: usize = 5;
@@ -68,6 +74,9 @@ struct CompParams {
 
     #[id = "gain"]
     pub gain: FloatParam,
+
+    #[id = "sidechain"]
+    pub sidechain: BoolParam,
 }
 
 struct SpecturmSubSystem {
@@ -179,6 +188,8 @@ impl Default for CompParams {
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
             .with_string_to_value(formatters::s2v_f32_gain_to_db()),
+
+            sidechain: BoolParam::new("sidechain", false),
         }
     }
 }
@@ -201,7 +212,9 @@ impl Default for OpenMbc {
         Self {
             params: Arc::new(OpenMbcParams::default()),
             sample_rate: 0.0,
-            comp_filt_state: std::array::from_fn(|_| CompFilter::default()),
+            comp_filt_state: std::array::from_fn(|_| {
+                std::array::from_fn(|_| CompFilter::default())
+            }),
             ui_data: Arc::new(Mutex::new(UiData::default())),
             spectrum_handle: SpecturmSubSystem::new(),
         }
@@ -214,6 +227,14 @@ impl Default for OpenMbcParams {
             editor_state: EguiState::from_size(1024, 640),
 
             comps: std::array::from_fn(|_| CompParams::default()),
+            stereo_mix: FloatParam::new(
+                "stereo_mix",
+                1.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_smoother(SmoothingStyle::Linear(DEFAULT_SMOOTHING_MSEC)),
+
+            mid_side: BoolParam::new("mid_side", false),
         }
     }
 }
@@ -228,18 +249,24 @@ impl Plugin for OpenMbc {
 
     // The first audio IO layout is used as the default. The other layouts may be selected either
     // explicitly or automatically by the host or the user depending on the plugin API/backend.
-    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
-        main_input_channels: NonZeroU32::new(2),
-        main_output_channels: NonZeroU32::new(2),
+    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[
+        AudioIOLayout {
+            main_input_channels: NonZeroU32::new(2),
+            main_output_channels: NonZeroU32::new(2),
 
-        aux_input_ports: &[],
-        aux_output_ports: &[],
+            aux_input_ports: &[new_nonzero_u32(2)],
 
-        // Individual ports and the layout as a whole can be named here. By default these names
-        // are generated as needed. This layout will be called 'Stereo', while a layout with
-        // only one input and output channel would be called 'Mono'.
-        names: PortNames::const_default(),
-    }];
+            ..AudioIOLayout::const_default()
+        },
+        // AudioIOLayout {
+        //     main_input_channels: NonZeroU32::new(1),
+        //     main_output_channels: NonZeroU32::new(1),
+
+        //     aux_input_ports: &[new_nonzero_u32(1)],
+
+        //     ..AudioIOLayout::const_default()
+        // },
+    ];
 
     const MIDI_INPUT: MidiConfig = MidiConfig::None;
     const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
@@ -276,17 +303,19 @@ impl Plugin for OpenMbc {
         }
         self.spectrum_handle.configure();
 
-        for (idx, comp_filt) in self.comp_filt_state.iter_mut().enumerate() {
-            comp_filt.filt.sample_rate = self.sample_rate;
-            comp_filt.filt.center_freq = self.params.comps[idx].center_freq.value();
-            comp_filt.filt.octaves = self.params.comps[idx].q.value();
-            comp_filt.filt.configure();
+        for (idx, cf_channel) in self.comp_filt_state.iter_mut().enumerate() {
+            for comp_filt in cf_channel.iter_mut() {
+                comp_filt.filt.sample_rate = self.sample_rate;
+                comp_filt.filt.center_freq = self.params.comps[idx].center_freq.value();
+                comp_filt.filt.octaves = self.params.comps[idx].q.value();
+                comp_filt.filt.configure();
 
-            comp_filt.comp.update_sample_rate(self.sample_rate);
-            //TODO: might need to remove this as this will destroy user settings if sample rate is updated
-            comp_filt.comp.solver.update_attack(5.0);
-            comp_filt.comp.solver.update_release(100.0);
-            comp_filt.comp.solver.update_ratio(1.0);
+                comp_filt.comp.update_sample_rate(self.sample_rate);
+                //TODO: might need to remove this as this will destroy user settings if sample rate is updated
+                comp_filt.comp.solver.update_attack(5.0);
+                comp_filt.comp.solver.update_release(100.0);
+                comp_filt.comp.solver.update_ratio(1.0);
+            }
         }
 
         true
@@ -307,16 +336,9 @@ impl Plugin for OpenMbc {
     fn process(
         &mut self,
         buffer: &mut Buffer,
-        _aux: &mut AuxiliaryBuffers,
+        aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
-        let tot_enabled_chs: usize = self
-            .params
-            .comps
-            .iter()
-            .filter(|x| x.enable.value())
-            .count();
-
         //redraw filters (when allowed)
         if let Ok(mut uidata) = self.ui_data.try_lock() {
             uidata.set_filter_shape(0.0);
@@ -330,7 +352,7 @@ impl Plugin for OpenMbc {
                     if self.params.comps[idx].enable.value() {
                         let main_filter_mag = ui::utils::get_filter_shape(
                             self.sample_rate,
-                            comp_filt.filt.get_main_filter(),
+                            comp_filt[0].filt.get_main_filter(),
                             1.0,
                         );
 
@@ -348,7 +370,7 @@ impl Plugin for OpenMbc {
                     if self.params.comps[idx].enable.value() {
                         h_total_filtered += main_filters[idx][i]
                             * (nih_plug::util::db_to_gain_fast(
-                                -comp_filt.comp.curr_reduction_post_model,
+                                -comp_filt[0].comp.curr_reduction_post_model,
                             ) as f64)
                             * self.params.comps[idx].gain.smoothed.next() as f64;
                         h_static_sum += main_filters[idx][i]
@@ -360,7 +382,8 @@ impl Plugin for OpenMbc {
             }
 
             for i in 0..MAX_MBCS {
-                uidata.gain_reduction[i] = self.comp_filt_state[i].comp.curr_reduction_post_model;
+                uidata.gain_reduction[i] =
+                    self.comp_filt_state[i][0].comp.curr_reduction_post_model;
             }
 
             if self.spectrum_handle.samples_in_buf >= NUM_OF_VIZ_FFT_POINTS {
@@ -396,89 +419,140 @@ impl Plugin for OpenMbc {
 
         let mut samples_to_copy = 0;
         //TODO: THIS IS STEREO!
-        for (smp_idx, channel_samples) in buffer.iter_samples().enumerate() {
+        for (smp_idx, (mut channel_samples, aux_samples)) in buffer
+            .iter_samples()
+            .zip(aux.inputs[0].iter_samples())
+            .enumerate()
+        {
             //note that we get rows here, as in each channle samples is only two samples, one for L and one for R
-            for (ch, sample) in channel_samples.into_iter().enumerate() {
+            let mut mid_side = [0.0, 0.0];
+            let mut left_right = [0.0, 0.0];
+            let mut aux_left_right = [0.0, 0.0];
+
+            //create mid side version (cheaper to do it always)
+            // as in mid = L+R, side = L-R
+            for (ch, (sample, aux)) in channel_samples.iter_mut().zip(aux_samples).enumerate() {
+                left_right[ch] = *sample;
+                aux_left_right[ch] = *aux;
+            }
+            // mid side has double the power
+            mid_side[0] = 0.5 * (left_right[0] + left_right[1]);
+            mid_side[1] = 0.5 * (left_right[0] - left_right[1]);
+
+            for (ch, sample) in channel_samples.iter_mut().enumerate() {
+                //replace the input sample if user selected mid side.
+                if self.params.mid_side.value() {
+                    *sample = mid_side[ch];
+                }
+
                 // we let this run in the sample loop due to the way smoothing works, however, we might need to trick smoother
                 // if we don't want to spend a lot of time each sample to reconfigure blocks
                 for (idx, comp_filt) in self.comp_filt_state.iter_mut().enumerate() {
                     let this_comp_params = &self.params.comps[idx];
-
                     // handle bpf update
                     if (this_comp_params.center_freq.smoothed.is_smoothing())
                         || (this_comp_params.q.smoothed.is_smoothing())
                     {
-                        comp_filt.filt.center_freq = this_comp_params.center_freq.smoothed.next();
-                        comp_filt.filt.octaves = this_comp_params.q.smoothed.next();
+                        comp_filt[ch].filt.center_freq =
+                            this_comp_params.center_freq.smoothed.next();
+                        comp_filt[ch].filt.octaves = this_comp_params.q.smoothed.next();
                         // comp_filt.filt.reset();
-                        comp_filt.filt.configure();
+                        comp_filt[ch].filt.configure();
                     }
 
                     // handle comp update
                     if this_comp_params.attack.smoothed.is_smoothing() {
-                        comp_filt
+                        comp_filt[ch]
                             .comp
                             .solver
                             .update_attack(this_comp_params.attack.smoothed.next());
                     }
 
                     if this_comp_params.release.smoothed.is_smoothing() {
-                        comp_filt
+                        comp_filt[ch]
                             .comp
                             .solver
                             .update_release(this_comp_params.release.smoothed.next());
                     }
 
                     if this_comp_params.ratio.smoothed.is_smoothing() {
-                        comp_filt
+                        comp_filt[ch]
                             .comp
                             .solver
                             .update_ratio(this_comp_params.ratio.smoothed.next());
                     }
                     if this_comp_params.threshold.smoothed.is_smoothing() {
-                        comp_filt.comp.solver.threshold =
+                        comp_filt[ch].comp.solver.threshold =
                             gain_to_db_fast(this_comp_params.threshold.smoothed.next());
                     }
 
-                    //TODO: missing params - makeup gain, knee width, compressor type
-
-                    //TODO: missing settings - side chain!
+                    //TODO: missing params - makeup gain, knee width, compressor type, filter type
                     //TODO: missing settings - solo
                 }
 
                 if ch == 0 {
                     buf_pre[smp_idx] = *sample;
                     samples_to_copy += 1;
+                }
+                let mut total_crossover = 0.0;
+                let mut total_filt_comp = 0.0;
 
-                    let mut total_crossover = 0.0;
-                    let mut total_filt_comp = 0.0;
+                for i in 0..MAX_MBCS {
+                    if self.params.comps[i].enable.value() {
+                        let comp_filt = &mut self.comp_filt_state[i];
 
-                    for i in 0..MAX_MBCS {
-                        if self.params.comps[i].enable.value() {
-                            let comp_filt = &mut self.comp_filt_state[i];
+                        let stereo_mix = self.params.stereo_mix.value();
+                        //TODO: missing condtion on if we're using an actual side chain!
+                        let sc_input = if self.params.comps[i].sidechain.value() {
+                            aux_left_right
+                        } else {
+                            left_right
+                        };
 
-                            //filter
-                            let (filt_main, filt_aux) = comp_filt.filt.process(*sample);
+                        let sc = match stereo_mix {
+                            0.0 => None,
+                            _ => Some(
+                                sc_input[ch] * (1.0 - stereo_mix) + sc_input[1 - ch] * stereo_mix,
+                            ),
+                        };
+                        //filter
+                        let (filt_main, sc) = comp_filt[ch].filt.process(*sample, sc);
 
-                            //compress
-                            let comp = comp_filt.comp.process(filt_main, None);
+                        //compress
 
-                            total_crossover += filt_main;
-                            total_filt_comp += comp * self.params.comps[i].gain.smoothed.next();
-                        }
+                        let comp = comp_filt[ch].comp.process(filt_main, sc);
+
+                        total_crossover += filt_main;
+                        total_filt_comp += comp * self.params.comps[i].gain.smoothed.next();
                     }
+                }
 
-                    let total_output = total_filt_comp + *sample - total_crossover;
+                let total_output = total_filt_comp + *sample - total_crossover;
 
-                    *sample = total_output;
+                *sample = total_output;
 
-                    *sample = sample.clamp(-1.5, 1.5); //hard limit to no more than 3.5dB over
-                    buf_post[smp_idx] = *sample;
+                //write back the result to the mid-side buffer, we will then use it to override the data
+                mid_side[ch] = sample.clamp(-1.5, 1.5); //hard limit to no more than 3.5dB over
+
+                if ch == 0 {
+                    buf_post[smp_idx] = mid_side[ch];
+                }
+            }
+
+            //handle L-R Reconstruction if we processed using mid-side
+            for (ch, sample) in channel_samples.iter_mut().enumerate() {
+                if self.params.mid_side.value() {
+                    if ch == 0 {
+                        *sample = mid_side[0] + mid_side[1];
+                    } else {
+                        *sample = mid_side[0] - mid_side[1];
+                    }
+                } else {
+                    *sample = mid_side[ch];
                 }
             }
         }
         if self.spectrum_handle.samples_in_buf < NUM_OF_VIZ_FFT_POINTS {
-            // info!("s2c: {}\n buf: {:?}",samples_to_copy,buf);
             self.spectrum_handle.pre_comp_stft_handle.write_input(
                 0,
                 self.spectrum_handle.samples_in_buf,
