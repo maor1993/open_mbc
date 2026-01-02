@@ -1,4 +1,4 @@
-use egui_plot::{FilledArea, Plot, PlotItem};
+use egui_plot::Plot;
 use std::{
     f32, f64,
     sync::{Arc, Mutex},
@@ -11,7 +11,7 @@ use splines::{self, Key};
 use nih_plug::{editor::Editor, log::info, prelude::ParamSetter};
 use nih_plug_egui::{
     create_egui_editor,
-    egui::{self, widgets::ProgressBar, Vec2},
+    egui::{self, widgets::ProgressBar, Color32, Vec2},
     resizable_window::ResizableWindow,
     EguiState,
 };
@@ -38,6 +38,16 @@ pub const FREQ_STEP: f64 =
 
 static FREQUENCIES: OnceLock<[f64; NUM_OF_FILTER_POINTS]> = OnceLock::new();
 static FREQUENCIES_LOG10: OnceLock<[f64; NUM_OF_FILTER_POINTS]> = OnceLock::new();
+
+const COLOR_COMP_LINE: Color32 = Color32::from_rgb(0xf9, 0xc7, 0x84);
+
+const COLOR_BASELINE: [Color32; MAX_MBCS] = [
+    Color32::from_rgb(0xED, 0x25, 0x4E),
+    Color32::from_rgb(0xF9, 0xDC, 0x5C),
+    Color32::from_rgb(0xc1, 0xff, 0xf2),
+    Color32::from_rgb(0x43, 0x31, 0x98),
+    Color32::from_rgb(0xff, 0xca, 0xd4),
+];
 
 pub fn get_frequencies() -> &'static [f64; NUM_OF_FILTER_POINTS] {
     FREQUENCIES.get_or_init(|| {
@@ -260,7 +270,6 @@ pub fn build_editor(
                                             step_size: 1.0, // Used by egui to determine line thickness
                                         });
 
-                                        // Minor ticks (2, 3, 4... 9 * 10^pow)
                                         // Only draw if we aren't zoomed out too far to keep the UI clean
                                         for i in 2..10 {
                                             let val = (i as f64 * base).log10();
@@ -287,7 +296,7 @@ pub fn build_editor(
                                         format!("{:.0}", res)
                                     }
                                 })
-                                .label_formatter(|name, value| {
+                                .label_formatter(|_, value| {
                                     format!(
                                         "freq:{:.0}\nGain:{:.2}",
                                         10.0_f64.powf(value.x),
@@ -330,8 +339,13 @@ pub fn build_editor(
                                             .map(|(&x, y)| [x, y])
                                             .collect();
 
+                                        let color = match filter_idx {
+                                            0..MAX_MBCS => COLOR_BASELINE[filter_idx],
+                                            _ => COLOR_COMP_LINE,
+                                        };
+
                                         let line = egui_plot::Line::new("", points)
-                                            // .color(egui::Color32::from_rgb(100, 200, 255))
+                                            .color(color)
                                             .width(2.0);
                                         //TODO: this is a kombina for now
                                         if (0..MAX_MBCS).contains(&filter_idx) {
@@ -344,9 +358,9 @@ pub fn build_editor(
                                                 &filter_shape_db,
                                                 &main_line_shape_db,
                                             )
-                                            .fill_color(egui::Color32::from_rgba_unmultiplied(
-                                                200, 200, 10, 40,
-                                            ));
+                                            .fill_color(
+                                                COLOR_BASELINE[filter_idx].gamma_multiply_u8(40),
+                                            );
 
                                             plot_ui.add(filledarea);
                                         } else {
@@ -447,6 +461,7 @@ pub fn build_editor(
                                         plot_ui.points(
                                             egui_plot::Points::new(format!("Filter {}", i), pnt)
                                                 .radius(point_size)
+                                                .color(COLOR_BASELINE[i])
                                                 .filled(true),
                                         );
 
@@ -458,7 +473,8 @@ pub fn build_editor(
                                         let span = egui_plot::Span::new(
                                             format!("filter {}", i),
                                             filt_min.log10()..=filt_max.log10(),
-                                        );
+                                        )
+                                        .fill(COLOR_BASELINE[i].gamma_multiply_u8(10));
 
                                         plot_ui.span(span);
                                     }
