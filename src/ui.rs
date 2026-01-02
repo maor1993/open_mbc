@@ -6,6 +6,8 @@ use std::{
 
 use egui_knob::Knob;
 
+use splines::{self, Key};
+
 use nih_plug::{editor::Editor, log::info, prelude::ParamSetter};
 use nih_plug_egui::{
     create_egui_editor,
@@ -21,14 +23,14 @@ use crate::MAX_MBCS;
 
 use crate::{FREQ_RANGE_MAX, FREQ_RANGE_MIN};
 pub const NUM_OF_FILTER_POINTS: usize = 1024; //used for visualization, might need to interpolate
-pub const NUM_OF_VIZ_FFT_POINTS: usize = 1024; // window size of ~20msec
+pub const NUM_OF_VIZ_FFT_POINTS: usize = 2048; // window size of ~20msec
 
 use std::sync::OnceLock;
 
 pub const FREQ_RANGE_MAX_LOG10: f64 = 4.38021124_f64; //manually calculated from 24Khz
-pub const FREQ_RANGE_MIN_LOG10: f64 = 1.0_f64;
+pub const FREQ_RANGE_MIN_LOG10: f64 = 1.301029996_f64; //manually calculated from 20Hz
 
-pub const MIN_POWER_DB: isize = -60;
+pub const MIN_POWER_DB: isize = -80;
 pub const MAX_POWER_DB: isize = 12;
 
 pub const FREQ_STEP: f64 =
@@ -52,6 +54,7 @@ pub struct UiData {
     curr_mbc_idx: usize,
     pub sample_rate: f32,
     filter_shapes: Vec<[f64; NUM_OF_FILTER_POINTS]>,
+    pub prev_spectrogram: [f32; NUM_OF_VIZ_FFT_POINTS / 2],
     pub signal_spectrogram_pre: [f32; NUM_OF_VIZ_FFT_POINTS / 2],
     pub signal_spectrogram_post: [f32; NUM_OF_VIZ_FFT_POINTS / 2],
     pub gain_reduction: [f32; MAX_MBCS],
@@ -63,6 +66,7 @@ impl Default for UiData {
             curr_mbc_idx: 0,
             sample_rate: 0.0,
             filter_shapes: vec![[0.0_f64; NUM_OF_FILTER_POINTS]; (MAX_MBCS * 3) + 1],
+            prev_spectrogram: [f32::NEG_INFINITY; NUM_OF_VIZ_FFT_POINTS / 2],
             signal_spectrogram_pre: [f32::NEG_INFINITY; NUM_OF_VIZ_FFT_POINTS / 2],
             signal_spectrogram_post: [f32::NEG_INFINITY; NUM_OF_VIZ_FFT_POINTS / 2],
             gain_reduction: [0.0_f32; MAX_MBCS],
@@ -136,7 +140,7 @@ fn create_state_tooltip(
             ui.add(
                 ProgressBar::new((60.0 - curr_gain_reduction[idx]) / 60.0)
                     .show_percentage()
-                    .text("reduction")
+                    .text(format!("reduction: {:.1}dB", curr_gain_reduction[idx]))
                     .desired_width(300.0),
             );
         });
@@ -306,23 +310,51 @@ pub fn build_editor(
                                     }
 
                                     //draw stft graph
-
-                                    let fft_freqs: [f64; NUM_OF_VIZ_FFT_POINTS / 2] =
+                                    //TODO: no need to recalculate this every time, only on sample rate updates
+                                    let mut fft_freqs: [f64; NUM_OF_VIZ_FFT_POINTS / 2] =
                                         std::array::from_fn(|i| {
                                             (uidata.sample_rate as f64 * i as f64
                                                 / NUM_OF_VIZ_FFT_POINTS as f64)
                                                 .log10()
                                         });
+                                    fft_freqs[0] = 1.0;
 
+                                    // let points_pre: egui_plot::PlotPoints = (0
+                                    //     ..NUM_OF_VIZ_FFT_POINTS / 2)
+                                    //     .map(|i| {
+                                    //         let x = fft_freqs[i];
+                                    //         let y = nih_plug::util::gain_to_db_fast(
+                                    //             uidata.signal_spectrogram_pre[i],
+                                    //         );
+
+                                    //         [x, y as f64]
+                                    //     })
+                                    //     .collect();
+
+                                    let points_pre = splines::Spline::from_vec(
+                                        (0..NUM_OF_VIZ_FFT_POINTS / 2)
+                                            .map(|i| {
+                                                let x = fft_freqs[i];
+                                                let y = nih_plug::util::gain_to_db_fast(
+                                                    uidata.signal_spectrogram_pre[i],
+                                                )
+                                                    as f64;
+
+                                                Key::new(x, y, splines::Interpolation::Cosine)
+                                            })
+                                            .collect(),
+                                    );
+                                    let interp_size = 8;
                                     let points_pre: egui_plot::PlotPoints = (0
-                                        ..NUM_OF_VIZ_FFT_POINTS / 2)
+                                        ..(NUM_OF_VIZ_FFT_POINTS * interp_size / 2))
                                         .map(|i| {
-                                            let x = fft_freqs[i];
-                                            let y = nih_plug::util::gain_to_db_fast(
-                                                uidata.signal_spectrogram_pre[i],
-                                            );
+                                            let x = (uidata.sample_rate as f64 * i as f64
+                                                / ((NUM_OF_VIZ_FFT_POINTS * interp_size) as f64))
+                                                .log10();
 
-                                            [x, y as f64]
+                                            let y = points_pre.clamped_sample(x).unwrap();
+
+                                            [x, y]
                                         })
                                         .collect();
 
@@ -432,6 +464,8 @@ pub fn build_editor(
                                                                 .powf(mouse_pos.x as f32)
                                                                 .round()
                                                         );
+
+                                                        uidata.curr_mbc_idx = idx;
                                                     }
                                                 }
                                             }

@@ -128,7 +128,7 @@ impl Default for CompParams {
             .with_smoother(SmoothingStyle::Logarithmic(DEFAULT_SMOOTHING_MSEC)),
             ratio: FloatParam::new(
                 "Ratio",
-                1.0,
+                4.0,
                 FloatRange::Linear {
                     min: 1.0,
                     max: 10.0,
@@ -308,13 +308,14 @@ impl Plugin for OpenMbc {
                 comp_filt.filt.sample_rate = self.sample_rate;
                 comp_filt.filt.center_freq = self.params.comps[idx].center_freq.value();
                 comp_filt.filt.octaves = self.params.comps[idx].q.value();
+
                 comp_filt.filt.configure();
 
                 comp_filt.comp.update_sample_rate(self.sample_rate);
                 //TODO: might need to remove this as this will destroy user settings if sample rate is updated
                 comp_filt.comp.solver.update_attack(5.0);
                 comp_filt.comp.solver.update_release(100.0);
-                comp_filt.comp.solver.update_ratio(1.0);
+                comp_filt.comp.solver.update_ratio(4.0);
             }
         }
 
@@ -368,11 +369,13 @@ impl Plugin for OpenMbc {
                 for (idx, comp_filt) in self.comp_filt_state.iter().enumerate() {
                     //TODO: all of these enables should be downstreamed to the struct and read from there.
                     if self.params.comps[idx].enable.value() {
+                        let gain = self.params.comps[idx].gain.value();
+
                         h_total_filtered += main_filters[idx][i]
                             * (nih_plug::util::db_to_gain_fast(
                                 -comp_filt[0].comp.curr_reduction_post_model,
                             ) as f64)
-                            * self.params.comps[idx].gain.smoothed.next() as f64;
+                            * gain as f64;
                         h_static_sum += main_filters[idx][i]
                     }
 
@@ -418,7 +421,6 @@ impl Plugin for OpenMbc {
         let mut buf_post = [0.0_f32; NUM_OF_VIZ_FFT_POINTS];
 
         let mut samples_to_copy = 0;
-        //TODO: THIS IS STEREO!
         for (smp_idx, (mut channel_samples, aux_samples)) in buffer
             .iter_samples()
             .zip(aux.inputs[0].iter_samples())
@@ -451,12 +453,20 @@ impl Plugin for OpenMbc {
                     let this_comp_params = &self.params.comps[idx];
                     // handle bpf update
                     if (this_comp_params.center_freq.smoothed.is_smoothing())
-                        || (this_comp_params.q.smoothed.is_smoothing())
+                        || (this_comp_params.q.smoothed.is_smoothing()
+                            || (this_comp_params.gain.smoothed.is_smoothing()))
                     {
                         comp_filt[ch].filt.center_freq =
                             this_comp_params.center_freq.smoothed.next();
                         comp_filt[ch].filt.octaves = this_comp_params.q.smoothed.next();
-                        // comp_filt.filt.reset();
+
+                        //TODO: let user choose this..
+                        comp_filt[ch].filt.mode = match comp_filt[ch].filt.center_freq {
+                            0.0..100.0 => FilterType::Lowpass,
+                            100.0..10000.0 => FilterType::Bandpass,
+                            _ => FilterType::Highpass,
+                        };
+
                         comp_filt[ch].filt.configure();
                     }
 
@@ -522,8 +532,10 @@ impl Plugin for OpenMbc {
 
                         let comp = comp_filt[ch].comp.process(filt_main, sc);
 
+                        let gain = self.params.comps[i].gain.smoothed.next();
+
                         total_crossover += filt_main;
-                        total_filt_comp += comp * self.params.comps[i].gain.smoothed.next();
+                        total_filt_comp += comp * gain;
                     }
                 }
 
