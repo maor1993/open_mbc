@@ -343,7 +343,7 @@ impl Plugin for OpenMbc {
         //redraw filters (when allowed)
         if let Ok(mut uidata) = self.ui_data.try_lock() {
             uidata.set_filter_shape(0.0);
-            let mut sum_all = [Complex64::new(0.0, 0.0); NUM_OF_FILTER_POINTS];
+
             let mut main_filters = [[Complex64::new(0.0, 0.0); NUM_OF_FILTER_POINTS]; MAX_MBCS];
             //visualize each filter seperately
             self.comp_filt_state
@@ -358,37 +358,58 @@ impl Plugin for OpenMbc {
                         );
 
                         main_filters[idx].copy_from_slice(&main_filter_mag);
+
+                        let filt_plot = uidata.borrow_filter_shape(idx).unwrap();
+
+                        // create solo shape
+                        let gain = self.params.comps[idx].gain.value();
+                        for i in 0..NUM_OF_FILTER_POINTS {
+                            filt_plot[i] = (Complex64::ONE - main_filter_mag[i]
+                                + main_filter_mag[i]
+                                    * (nih_plug::util::db_to_gain_fast(-10.0) * gain) as f64)
+                                .norm()
+                        }
                     }
                 });
 
-            let sum_plot = uidata.borrow_filter_shape(3 * MAX_MBCS).unwrap();
             for i in 0..NUM_OF_FILTER_POINTS {
                 let mut h_total_filtered = Complex64::ZERO;
                 let mut h_static_sum = Complex64::ZERO;
-
+                let mut h_total_gain_only = Complex64::ZERO;
                 for (idx, comp_filt) in self.comp_filt_state.iter().enumerate() {
                     //TODO: all of these enables should be downstreamed to the struct and read from there.
                     if self.params.comps[idx].enable.value() {
-                        let gain = self.params.comps[idx].gain.value();
+                        let gain = self.params.comps[idx].gain.value() as f64;
+                        let comp_as_gain = nih_plug::util::db_to_gain_fast(
+                            -comp_filt[0].comp.curr_reduction_post_model,
+                        ) as f64;
 
-                        h_total_filtered += main_filters[idx][i]
-                            * (nih_plug::util::db_to_gain_fast(
-                                -comp_filt[0].comp.curr_reduction_post_model,
-                            ) as f64)
-                            * gain as f64;
-                        h_static_sum += main_filters[idx][i]
+                        h_total_filtered += main_filters[idx][i] * comp_as_gain * gain;
+                        h_static_sum += main_filters[idx][i];
+
+                        h_total_gain_only += main_filters[idx][i] * gain;
                     }
 
-                    sum_plot[i] =
-                        (Complex64::new(1.0, 0.0) - h_static_sum + h_total_filtered).norm();
+                    {
+                        let sum_plot = uidata.borrow_filter_shape(3 * MAX_MBCS).unwrap();
+                        sum_plot[i] = (Complex64::ONE - h_static_sum + h_total_filtered).norm();
+                    }
+                    {
+                        let sum_plot_no_compress =
+                            uidata.borrow_filter_shape(3 * MAX_MBCS - 1).unwrap();
+                        sum_plot_no_compress[i] =
+                            (Complex64::ONE - h_static_sum + h_total_gain_only).norm();
+                    }
                 }
             }
 
+            // GAIN REDUCTION
             for i in 0..MAX_MBCS {
                 uidata.gain_reduction[i] =
                     self.comp_filt_state[i][0].comp.curr_reduction_post_model;
             }
 
+            // SPECTURM
             if self.spectrum_handle.samples_in_buf >= NUM_OF_VIZ_FFT_POINTS {
                 let spectrum_pre = self
                     .spectrum_handle
@@ -496,7 +517,7 @@ impl Plugin for OpenMbc {
                             gain_to_db_fast(this_comp_params.threshold.smoothed.next());
                     }
 
-                    //TODO: missing params - makeup gain, knee width, compressor type, filter type
+                    //TODO: missing params - knee width, compressor type, filter type
                     //TODO: missing settings - solo
                 }
 

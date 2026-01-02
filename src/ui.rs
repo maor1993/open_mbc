@@ -1,4 +1,4 @@
-use egui_plot::Plot;
+use egui_plot::{FilledArea, Plot, PlotItem};
 use std::{
     f32, f64,
     sync::{Arc, Mutex},
@@ -37,6 +37,7 @@ pub const FREQ_STEP: f64 =
     (FREQ_RANGE_MAX_LOG10 - FREQ_RANGE_MIN_LOG10) / (NUM_OF_FILTER_POINTS as f64 - 1.0);
 
 static FREQUENCIES: OnceLock<[f64; NUM_OF_FILTER_POINTS]> = OnceLock::new();
+static FREQUENCIES_LOG10: OnceLock<[f64; NUM_OF_FILTER_POINTS]> = OnceLock::new();
 
 pub fn get_frequencies() -> &'static [f64; NUM_OF_FILTER_POINTS] {
     FREQUENCIES.get_or_init(|| {
@@ -44,6 +45,17 @@ pub fn get_frequencies() -> &'static [f64; NUM_OF_FILTER_POINTS] {
 
         for i in 0..NUM_OF_FILTER_POINTS {
             arr[i] = 10.0f64.powf(FREQ_RANGE_MIN_LOG10 + (i as f64) * FREQ_STEP);
+        }
+        arr
+    })
+}
+
+pub fn get_frequencies_log10() -> &'static [f64; NUM_OF_FILTER_POINTS] {
+    FREQUENCIES_LOG10.get_or_init(|| {
+        let mut arr = [0.0; NUM_OF_FILTER_POINTS];
+
+        for i in 0..NUM_OF_FILTER_POINTS {
+            arr[i] = FREQ_RANGE_MIN_LOG10 + (i as f64) * FREQ_STEP;
         }
         arr
     })
@@ -290,23 +302,56 @@ pub fn build_editor(
                                 ));
                                 {
                                     let uidata = ui_data.lock().unwrap();
-                                    for filter_shape in uidata.filter_shapes.iter() {
-                                        let points: egui_plot::PlotPoints = (0
-                                            ..NUM_OF_FILTER_POINTS)
-                                            .map(|i| {
-                                                let x = get_frequencies()[i].log10();
-                                                let y = nih_plug::util::gain_to_db_fast(
+
+                                    let main_line_shape_db: [f64; NUM_OF_FILTER_POINTS] =
+                                        std::array::from_fn(|i| {
+                                            nih_plug::util::gain_to_db_fast(
+                                                uidata.filter_shapes[3 * MAX_MBCS - 1][i] as f32,
+                                            ) as f64
+                                        });
+                                    for (filter_idx, filter_shape) in
+                                        uidata.filter_shapes.iter().enumerate()
+                                    {
+                                        let freq_bins = get_frequencies_log10();
+                                        let filter_shape_db: [f64; NUM_OF_FILTER_POINTS] =
+                                            std::array::from_fn(|i| {
+                                                nih_plug::util::gain_to_db_fast(
                                                     filter_shape[i] as f32,
                                                 )
-                                                    as f64;
-                                                [x, y]
-                                            })
+                                                    as f64
+                                            });
+
+                                        if filter_shape[0] == 0.0 {
+                                            continue;
+                                        }
+                                        let points: egui_plot::PlotPoints = freq_bins
+                                            .iter()
+                                            .zip(filter_shape_db)
+                                            .map(|(&x, y)| [x, y])
                                             .collect();
 
                                         let line = egui_plot::Line::new("", points)
                                             // .color(egui::Color32::from_rgb(100, 200, 255))
                                             .width(2.0);
-                                        plot_ui.line(line);
+                                        //TODO: this is a kombina for now
+                                        if (0..MAX_MBCS).contains(&filter_idx) {
+                                            // let filter_shape_min:Vec<f64> = filter_shape_db.iter().zip(main_line_shape_db).map(|(&y,main)| y-main).collect();
+                                            // let filter_shape_max:[f64;NUM_OF_FILTER_POINTS] = filter_shape_db;
+
+                                            let filledarea = egui_plot::FilledArea::new(
+                                                format!("filter {}", filter_idx),
+                                                freq_bins,
+                                                &filter_shape_db,
+                                                &main_line_shape_db,
+                                            )
+                                            .fill_color(egui::Color32::from_rgba_unmultiplied(
+                                                200, 200, 10, 40,
+                                            ));
+
+                                            plot_ui.add(filledarea);
+                                        } else {
+                                            plot_ui.line(line);
+                                        }
                                     }
 
                                     //draw stft graph
