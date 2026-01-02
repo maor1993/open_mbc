@@ -123,10 +123,11 @@ fn create_state_tooltip(
     //TODO: currently we're locking and unlocking many times, might need to be more efficient here.
     let curr_gain_reduction = ui_data.lock().unwrap().gain_reduction.clone();
 
-    // for idx in 0..MAX_MBCS{
-    let mut enable_0 = params.comps[idx].enable.value();
-    ui.checkbox(&mut enable_0, format!("Enable {}", idx));
-    update_param!(setter, &params.comps[idx].enable, enable_0);
+    {
+        let mut enable = params.comps[idx].enable.value();
+        ui.checkbox(&mut enable, format!("Enable {}", idx));
+        update_param!(setter, &params.comps[idx].enable, enable);
+    }
 
     // ui.label(format!("Octaves {}", idx));
 
@@ -360,10 +361,15 @@ pub fn build_editor(
                                                 params.comps[i].gain.value(),
                                             ) as f64,
                                         ];
-
+                                        let point_size =
+                                            if ui_data.lock().unwrap().curr_mbc_idx == i {
+                                                8.0
+                                            } else {
+                                                3.0
+                                            };
                                         plot_ui.points(
                                             egui_plot::Points::new(format!("Filter {}", i), pnt)
-                                                .radius(3.0)
+                                                .radius(point_size)
                                                 .filled(true),
                                         );
 
@@ -381,49 +387,87 @@ pub fn build_editor(
                                     }
                                 }
 
-                                const EX_IDX: usize = 3;
                                 if plot_ui.response().clicked() {
                                     if let Some(mouse_pos) = plot_ui.pointer_coordinate() {
-                                        if !params.comps[EX_IDX].enable.value() {
-                                            update_param!(
-                                                setter,
-                                                &params.comps[EX_IDX].enable,
-                                                true
-                                            );
-                                            update_param!(
-                                                setter,
-                                                &params.comps[EX_IDX].center_freq,
-                                                10.0_f32.powf(mouse_pos.x as f32).round()
-                                            );
+                                        let mut min_dist = f64::MAX;
+                                        let mut selected_idx: Option<usize> = None;
+                                        for i in 0..MAX_MBCS {
+                                            if !params.comps[i].enable.value() {
+                                                continue;
+                                            }
+
+                                            let dist = (mouse_pos.x
+                                                - params.comps[i].center_freq.value().log10()
+                                                    as f64)
+                                                .abs();
+
+                                            if (dist < min_dist) & (dist < 0.2) {
+                                                min_dist = dist;
+                                                selected_idx = Some(i);
+                                            }
+                                        }
+
+                                        {
+                                            let mut uidata = ui_data.lock().unwrap();
+
+                                            match selected_idx {
+                                                Some(i) => {
+                                                    uidata.curr_mbc_idx = i;
+                                                }
+                                                None => {
+                                                    if let Some(idx) = params
+                                                        .comps
+                                                        .iter()
+                                                        .position(|x| !x.enable.value())
+                                                    {
+                                                        update_param!(
+                                                            setter,
+                                                            &params.comps[idx].enable,
+                                                            true
+                                                        );
+                                                        update_param!(
+                                                            setter,
+                                                            &params.comps[idx].center_freq,
+                                                            10.0_f32
+                                                                .powf(mouse_pos.x as f32)
+                                                                .round()
+                                                        );
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
 
-                                //TODO: choose closest index
-
+                                let selected_index = ui_data.lock().unwrap().curr_mbc_idx;
                                 if plot_ui.response().dragged() {
                                     let drag_delta = plot_ui.response().drag_motion();
 
                                     let new_center_freq = 10.0_f32.powf(
-                                        params.comps[EX_IDX].center_freq.value().log10()
+                                        params.comps[selected_index].center_freq.value().log10()
                                             + drag_delta.x * FREQ_STEP as f32,
                                     );
 
-                                    let new_gain =
-                                        params.comps[EX_IDX].gain.value() - drag_delta.y * 0.01;
+                                    let new_gain = params.comps[selected_index].gain.value()
+                                        - drag_delta.y * 0.01;
                                     // info!("drag delta :{:?} new freq: {} new gain: {}", drag_delta, new_center_freq,new_gain);
                                     update_param!(
                                         setter,
-                                        &params.comps[EX_IDX].center_freq,
+                                        &params.comps[selected_index].center_freq,
                                         new_center_freq
                                     );
-                                    update_param!(setter, &params.comps[EX_IDX].gain, new_gain);
+                                    update_param!(
+                                        setter,
+                                        &params.comps[selected_index].gain,
+                                        new_gain
+                                    );
                                 }
                             });
                             resp
                         });
 
-                        let old_octaves = params.comps[3].q.value();
+                        let selected_index = ui_data.lock().unwrap().curr_mbc_idx;
+                        let old_octaves = params.comps[selected_index].q.value();
                         if resp.inner.response.hovered() {
                             let delta = ui.input(|i| {
                                 i.events.iter().find_map(|e| match e {
@@ -435,7 +479,7 @@ pub fn build_editor(
                             if let Some(delta) = delta {
                                 update_param!(
                                     setter,
-                                    &params.comps[3].q,
+                                    &params.comps[selected_index].q,
                                     old_octaves + delta.y * 0.1
                                 );
                             }
@@ -445,6 +489,7 @@ pub fn build_editor(
                             .id(egui::Id::new("popup"))
                             .align(egui::RectAlign::BOTTOM)
                             .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+                            .open(params.comps[selected_index].enable.value())
                             .show(|ui| {
                                 create_state_tooltip(ui, &params, &ui_data, setter);
                             });
