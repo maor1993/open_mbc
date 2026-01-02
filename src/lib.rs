@@ -421,12 +421,13 @@ impl Plugin for OpenMbc {
                     .process_block_to_spectrum(0);
 
                 for i in 0..NUM_OF_VIZ_FFT_POINTS / 2 {
+                    uidata.prev_spectrogram_pre[i] = uidata.signal_spectrogram_pre[i];
                     uidata.signal_spectrogram_pre[i] =
                         spectrum_pre[i].norm() / (NUM_OF_VIZ_FFT_POINTS / 2) as f32;
+                    uidata.prev_spectrogram_post[i] = uidata.signal_spectrogram_post[i];
                     uidata.signal_spectrogram_post[i] =
                         spectrum_post[i].norm() / (NUM_OF_VIZ_FFT_POINTS / 2) as f32;
                 }
-                // info!("specturm is: {:?}",uidata.signal_spectrogram);
 
                 self.spectrum_handle.samples_in_buf = 0;
                 self.spectrum_handle
