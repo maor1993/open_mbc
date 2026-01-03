@@ -15,6 +15,7 @@ use crossover::Crossover;
 
 mod ui;
 use ui::build_editor;
+use ui::PeakMeter;
 use ui::UiData;
 
 use nih_plug_egui::EguiState;
@@ -29,6 +30,8 @@ pub struct OpenMbc {
     comp_filt_state: [[CompFilter; 2]; MAX_MBCS], //stereo channel per compressor
     ui_data: Arc<Mutex<UiData>>,
     spectrum_handle: SpecturmSubSystem,
+    peak_meter: [ui::PeakMeter; 2],
+    peak_meter_result: Arc<[AtomicF32; 2]>,
 }
 
 #[derive(Params)]
@@ -128,7 +131,7 @@ impl Default for CompParams {
             .with_smoother(SmoothingStyle::Logarithmic(DEFAULT_SMOOTHING_MSEC)),
             ratio: FloatParam::new(
                 "Ratio",
-                1.0,
+                4.0,
                 FloatRange::Linear {
                     min: 1.0,
                     max: 10.0,
@@ -217,6 +220,8 @@ impl Default for OpenMbc {
             }),
             ui_data: Arc::new(Mutex::new(UiData::default())),
             spectrum_handle: SpecturmSubSystem::new(),
+            peak_meter: std::array::from_fn(|_| PeakMeter::new()),
+            peak_meter_result: Arc::new([AtomicF32::new(0.0), AtomicF32::new(0.0)]),
         }
     }
 }
@@ -289,17 +294,21 @@ impl Plugin for OpenMbc {
     fn initialize(
         &mut self,
         _audio_io_layout: &AudioIOLayout,
-        _buffer_config: &BufferConfig,
+        buffer_config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
         // Resize buffers and perform other potentially expensive initialization operations here.
         // The `reset()` function is always called right after this function. You can remove this
         // function if you do not need it.
-        self.sample_rate = _buffer_config.sample_rate;
+        self.sample_rate = buffer_config.sample_rate;
 
         {
             let mut uidata = self.ui_data.lock().unwrap();
             uidata.sample_rate = self.sample_rate;
+
+            for peakmeter in self.peak_meter.iter_mut() {
+                peakmeter.update_decay(ui::PEAK_METER_DECAY_MS, self.sample_rate);
+            }
         }
         self.spectrum_handle.configure();
 
@@ -308,13 +317,14 @@ impl Plugin for OpenMbc {
                 comp_filt.filt.sample_rate = self.sample_rate;
                 comp_filt.filt.center_freq = self.params.comps[idx].center_freq.value();
                 comp_filt.filt.octaves = self.params.comps[idx].q.value();
+
                 comp_filt.filt.configure();
 
                 comp_filt.comp.update_sample_rate(self.sample_rate);
                 //TODO: might need to remove this as this will destroy user settings if sample rate is updated
                 comp_filt.comp.solver.update_attack(5.0);
                 comp_filt.comp.solver.update_release(100.0);
-                comp_filt.comp.solver.update_ratio(1.0);
+                comp_filt.comp.solver.update_ratio(4.0);
             }
         }
 
@@ -330,7 +340,8 @@ impl Plugin for OpenMbc {
         let params = self.params.clone();
         let egui_state = params.editor_state.clone();
         let ui_data = self.ui_data.clone();
-        build_editor(params, egui_state, ui_data)
+        let pmv = self.peak_meter_result.clone();
+        build_editor(params, egui_state, ui_data, pmv)
     }
 
     fn process(
@@ -342,7 +353,7 @@ impl Plugin for OpenMbc {
         //redraw filters (when allowed)
         if let Ok(mut uidata) = self.ui_data.try_lock() {
             uidata.set_filter_shape(0.0);
-            let mut sum_all = [Complex64::new(0.0, 0.0); NUM_OF_FILTER_POINTS];
+
             let mut main_filters = [[Complex64::new(0.0, 0.0); NUM_OF_FILTER_POINTS]; MAX_MBCS];
             //visualize each filter seperately
             self.comp_filt_state
@@ -357,35 +368,58 @@ impl Plugin for OpenMbc {
                         );
 
                         main_filters[idx].copy_from_slice(&main_filter_mag);
+
+                        let filt_plot = uidata.borrow_filter_shape(idx).unwrap();
+
+                        // create solo shape
+                        let gain = self.params.comps[idx].gain.value();
+                        for i in 0..NUM_OF_FILTER_POINTS {
+                            filt_plot[i] = (Complex64::ONE - main_filter_mag[i]
+                                + main_filter_mag[i]
+                                    * (nih_plug::util::db_to_gain_fast(-10.0) * gain) as f64)
+                                .norm()
+                        }
                     }
                 });
 
-            let sum_plot = uidata.borrow_filter_shape(3 * MAX_MBCS).unwrap();
             for i in 0..NUM_OF_FILTER_POINTS {
                 let mut h_total_filtered = Complex64::ZERO;
                 let mut h_static_sum = Complex64::ZERO;
-
+                let mut h_total_gain_only = Complex64::ZERO;
                 for (idx, comp_filt) in self.comp_filt_state.iter().enumerate() {
                     //TODO: all of these enables should be downstreamed to the struct and read from there.
                     if self.params.comps[idx].enable.value() {
-                        h_total_filtered += main_filters[idx][i]
-                            * (nih_plug::util::db_to_gain_fast(
-                                -comp_filt[0].comp.curr_reduction_post_model,
-                            ) as f64)
-                            * self.params.comps[idx].gain.smoothed.next() as f64;
-                        h_static_sum += main_filters[idx][i]
+                        let gain = self.params.comps[idx].gain.value() as f64;
+                        let comp_as_gain = nih_plug::util::db_to_gain_fast(
+                            -comp_filt[0].comp.curr_reduction_post_model,
+                        ) as f64;
+
+                        h_total_filtered += main_filters[idx][i] * comp_as_gain * gain;
+                        h_static_sum += main_filters[idx][i];
+
+                        h_total_gain_only += main_filters[idx][i] * gain;
                     }
 
-                    sum_plot[i] =
-                        (Complex64::new(1.0, 0.0) - h_static_sum + h_total_filtered).norm();
+                    {
+                        let sum_plot = uidata.borrow_filter_shape(3 * MAX_MBCS).unwrap();
+                        sum_plot[i] = (Complex64::ONE - h_static_sum + h_total_filtered).norm();
+                    }
+                    {
+                        let sum_plot_no_compress =
+                            uidata.borrow_filter_shape(3 * MAX_MBCS - 1).unwrap();
+                        sum_plot_no_compress[i] =
+                            (Complex64::ONE - h_static_sum + h_total_gain_only).norm();
+                    }
                 }
             }
 
+            // GAIN REDUCTION
             for i in 0..MAX_MBCS {
                 uidata.gain_reduction[i] =
                     self.comp_filt_state[i][0].comp.curr_reduction_post_model;
             }
 
+            // SPECTURM
             if self.spectrum_handle.samples_in_buf >= NUM_OF_VIZ_FFT_POINTS {
                 let spectrum_pre = self
                     .spectrum_handle
@@ -397,12 +431,13 @@ impl Plugin for OpenMbc {
                     .process_block_to_spectrum(0);
 
                 for i in 0..NUM_OF_VIZ_FFT_POINTS / 2 {
+                    uidata.prev_spectrogram_pre[i] = uidata.signal_spectrogram_pre[i];
                     uidata.signal_spectrogram_pre[i] =
                         spectrum_pre[i].norm() / (NUM_OF_VIZ_FFT_POINTS / 2) as f32;
+                    uidata.prev_spectrogram_post[i] = uidata.signal_spectrogram_post[i];
                     uidata.signal_spectrogram_post[i] =
                         spectrum_post[i].norm() / (NUM_OF_VIZ_FFT_POINTS / 2) as f32;
                 }
-                // info!("specturm is: {:?}",uidata.signal_spectrogram);
 
                 self.spectrum_handle.samples_in_buf = 0;
                 self.spectrum_handle
@@ -418,7 +453,6 @@ impl Plugin for OpenMbc {
         let mut buf_post = [0.0_f32; NUM_OF_VIZ_FFT_POINTS];
 
         let mut samples_to_copy = 0;
-        //TODO: THIS IS STEREO!
         for (smp_idx, (mut channel_samples, aux_samples)) in buffer
             .iter_samples()
             .zip(aux.inputs[0].iter_samples())
@@ -428,7 +462,6 @@ impl Plugin for OpenMbc {
             let mut mid_side = [0.0, 0.0];
             let mut left_right = [0.0, 0.0];
             let mut aux_left_right = [0.0, 0.0];
-
             //create mid side version (cheaper to do it always)
             // as in mid = L+R, side = L-R
             for (ch, (sample, aux)) in channel_samples.iter_mut().zip(aux_samples).enumerate() {
@@ -451,12 +484,20 @@ impl Plugin for OpenMbc {
                     let this_comp_params = &self.params.comps[idx];
                     // handle bpf update
                     if (this_comp_params.center_freq.smoothed.is_smoothing())
-                        || (this_comp_params.q.smoothed.is_smoothing())
+                        || (this_comp_params.q.smoothed.is_smoothing()
+                            || (this_comp_params.gain.smoothed.is_smoothing()))
                     {
                         comp_filt[ch].filt.center_freq =
                             this_comp_params.center_freq.smoothed.next();
                         comp_filt[ch].filt.octaves = this_comp_params.q.smoothed.next();
-                        // comp_filt.filt.reset();
+
+                        //TODO: let user choose this..
+                        comp_filt[ch].filt.mode = match comp_filt[ch].filt.center_freq {
+                            0.0..100.0 => FilterType::Lowpass,
+                            100.0..10000.0 => FilterType::Bandpass,
+                            _ => FilterType::Highpass,
+                        };
+
                         comp_filt[ch].filt.configure();
                     }
 
@@ -486,7 +527,7 @@ impl Plugin for OpenMbc {
                             gain_to_db_fast(this_comp_params.threshold.smoothed.next());
                     }
 
-                    //TODO: missing params - makeup gain, knee width, compressor type, filter type
+                    //TODO: missing params - knee width, compressor type, filter type
                     //TODO: missing settings - solo
                 }
 
@@ -522,8 +563,10 @@ impl Plugin for OpenMbc {
 
                         let comp = comp_filt[ch].comp.process(filt_main, sc);
 
+                        let gain = self.params.comps[i].gain.smoothed.next();
+
                         total_crossover += filt_main;
-                        total_filt_comp += comp * self.params.comps[i].gain.smoothed.next();
+                        total_filt_comp += comp * gain;
                     }
                 }
 
@@ -550,7 +593,12 @@ impl Plugin for OpenMbc {
                 } else {
                     *sample = mid_side[ch];
                 }
+
+                let peak_result = self.peak_meter[ch].step(sample.abs());
+                self.peak_meter_result[ch].store(peak_result, std::sync::atomic::Ordering::Relaxed);
             }
+
+            //write peak meter value
         }
         if self.spectrum_handle.samples_in_buf < NUM_OF_VIZ_FFT_POINTS {
             self.spectrum_handle.pre_comp_stft_handle.write_input(

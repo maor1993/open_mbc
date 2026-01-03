@@ -32,6 +32,30 @@ impl Crossover {
                     (self.center_freq / self.sample_rate) as f64,
                     self.octaves as f64,
                 );
+            },
+            FilterType::Lowpass => {
+                self.filters[0].lowpass(
+                    (self.center_freq / self.sample_rate) as f64,
+                    self.octaves as f64,
+                    cute_dsp::filters::BiquadDesign::Bilinear
+                );
+                self.filters[1].lowpass(
+                    (self.center_freq / self.sample_rate) as f64,
+                    self.octaves as f64,
+                    cute_dsp::filters::BiquadDesign::Bilinear
+                );
+            },
+            FilterType::Highpass => {
+                self.filters[0].highpass(
+                    (self.center_freq / self.sample_rate) as f64,
+                    self.octaves as f64,
+                    cute_dsp::filters::BiquadDesign::Bilinear
+                );
+                self.filters[1].highpass(
+                    (self.center_freq / self.sample_rate) as f64,
+                    self.octaves as f64,
+                    cute_dsp::filters::BiquadDesign::Bilinear
+                );
             }
             _ => todo!(),
         };
