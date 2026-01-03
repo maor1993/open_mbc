@@ -625,6 +625,9 @@ impl Plugin for OpenMbc {
         }
         if self.spectrum_handle.samples_in_buf < NUM_OF_VIZ_FFT_POINTS {
             if self.params.editor_state.is_open() {
+                if self.spectrum_handle.samples_in_buf+samples_to_copy > NUM_OF_VIZ_FFT_POINTS{
+                    samples_to_copy = NUM_OF_VIZ_FFT_POINTS-self.spectrum_handle.samples_in_buf;
+                }
                 self.spectrum_handle.pre_comp_stft_handle.write_input(
                     0,
                     self.spectrum_handle.samples_in_buf,

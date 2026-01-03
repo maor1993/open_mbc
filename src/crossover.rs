@@ -4,7 +4,7 @@ pub struct Crossover {
     pub sample_rate: f32,
     pub center_freq: f32,
     pub octaves: f32,
-    pub spacing: f32,
+    pub _spacing: f32,
     pub mode: FilterType,
     filters: [Biquad<f64>; 2],
 }
@@ -15,7 +15,7 @@ impl Crossover {
             sample_rate,
             center_freq: 0.0,
             octaves: 0.0,
-            spacing: 500.0,
+            _spacing: 500.0,
             mode,
             filters: std::array::from_fn(|_| Biquad::new(true)),
         }
@@ -74,7 +74,7 @@ impl Crossover {
     pub fn get_main_filter(&self) -> &Biquad<f64> {
         &self.filters[0]
     }
-    pub fn get_aux_filter(&self) -> &Biquad<f64> {
+    pub fn _get_aux_filter(&self) -> &Biquad<f64> {
         &self.filters[1]
     }
 }

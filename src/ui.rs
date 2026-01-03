@@ -147,10 +147,6 @@ impl UiData {
         }
     }
 
-    pub fn add_filter_shape(&mut self) {
-        self.filter_shapes.push([0.0_f64; NUM_OF_FILTER_POINTS]);
-    }
-
     pub fn borrow_filter_shape(&mut self, index: usize) -> Option<&mut [f64]> {
         if index < self.filter_shapes.len() {
             return Some(&mut self.filter_shapes[index]);
