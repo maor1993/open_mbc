@@ -92,17 +92,12 @@ jobs:
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          # The certificate name is usually "Developer ID Application: Your Name (TEAMID)"
-          # We can find the exact identity string from the imported keychain
           CERT_ID=$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | awk -F '"' '{print $2}')
           
           for plugin in target/bundled/*.vst3; do
             echo "Signing $plugin..."
-            # --options runtime is required for notarization (Hardened Runtime)
             codesign --force --options runtime --timestamp --sign "$CERT_ID" --deep "$plugin"
-            
             echo "Notarizing $plugin..."
-            # Notarization requires a ZIP/DMG/PKG. We'll use a temporary ZIP.
             zip_name="notarization_tmp.zip"
             ditto -c -k --keepParent "$plugin" "$zip_name"
             
