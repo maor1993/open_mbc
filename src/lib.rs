@@ -352,7 +352,7 @@ impl Plugin for OpenMbc {
         // allocate. You can remove this function if you do not need it.
     }
 
-    fn editor(&mut self, async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
         let params = self.params.clone();
         let egui_state = params.editor_state.clone();
         let ui_data = self.ui_data.clone();
@@ -367,101 +367,104 @@ impl Plugin for OpenMbc {
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
         //redraw filters (when allowed)
-        if let Ok(mut uidata) = self.ui_data.try_lock() {
-            uidata.set_filter_shape(0.0);
 
-            let mut main_filters = [[Complex64::new(0.0, 0.0); NUM_OF_FILTER_POINTS]; MAX_MBCS];
-            //visualize each filter seperately
-            self.comp_filt_state
-                .iter()
-                .enumerate()
-                .for_each(|(idx, comp_filt)| {
-                    if self.params.comps[idx].enable.value() {
-                        let main_filter_mag = ui::utils::get_filter_shape(
-                            self.sample_rate,
-                            comp_filt[0].filt.get_main_filter(),
-                            1.0,
-                        );
+        if self.params.editor_state.is_open() {
+            if let Ok(mut uidata) = self.ui_data.try_lock() {
+                uidata.set_filter_shape(0.0);
 
-                        main_filters[idx].copy_from_slice(&main_filter_mag);
+                let mut main_filters = [[Complex64::new(0.0, 0.0); NUM_OF_FILTER_POINTS]; MAX_MBCS];
+                //visualize each filter seperately
+                self.comp_filt_state
+                    .iter()
+                    .enumerate()
+                    .for_each(|(idx, comp_filt)| {
+                        if self.params.comps[idx].enable.value() {
+                            let main_filter_mag = ui::utils::get_filter_shape(
+                                self.sample_rate,
+                                comp_filt[0].filt.get_main_filter(),
+                                1.0,
+                            );
 
-                        let filt_plot = uidata.borrow_filter_shape(idx).unwrap();
+                            main_filters[idx].copy_from_slice(&main_filter_mag);
 
-                        // create solo shape
-                        let gain = self.params.comps[idx].gain.value();
-                        for i in 0..NUM_OF_FILTER_POINTS {
-                            filt_plot[i] = (Complex64::ONE - main_filter_mag[i]
-                                + main_filter_mag[i]
-                                    * (self.params.comps[idx].range.value() * gain) as f64)
-                                .norm()
+                            let filt_plot = uidata.borrow_filter_shape(idx).unwrap();
+
+                            // create solo shape
+                            let gain = self.params.comps[idx].gain.value();
+                            for i in 0..NUM_OF_FILTER_POINTS {
+                                filt_plot[i] = (Complex64::ONE - main_filter_mag[i]
+                                    + main_filter_mag[i]
+                                        * (self.params.comps[idx].range.value() * gain) as f64)
+                                    .norm()
+                            }
+                        }
+                    });
+
+                for i in 0..NUM_OF_FILTER_POINTS {
+                    let mut h_total_filtered = Complex64::ZERO;
+                    let mut h_static_sum = Complex64::ZERO;
+                    let mut h_total_gain_only = Complex64::ZERO;
+                    for (idx, comp_filt) in self.comp_filt_state.iter().enumerate() {
+                        //TODO: all of these enables should be downstreamed to the struct and read from there.
+                        if self.params.comps[idx].enable.value() {
+                            let gain = self.params.comps[idx].gain.value() as f64;
+                            let comp_as_gain = nih_plug::util::db_to_gain_fast(
+                                -comp_filt[0].comp.curr_reduction_post_model,
+                            ) as f64;
+
+                            h_total_filtered += main_filters[idx][i] * comp_as_gain * gain;
+                            h_static_sum += main_filters[idx][i];
+
+                            h_total_gain_only += main_filters[idx][i] * gain;
+                        }
+
+                        {
+                            let sum_plot = uidata.borrow_filter_shape(3 * MAX_MBCS).unwrap();
+                            sum_plot[i] = (Complex64::ONE - h_static_sum + h_total_filtered).norm();
+                        }
+                        {
+                            let sum_plot_no_compress =
+                                uidata.borrow_filter_shape(3 * MAX_MBCS - 1).unwrap();
+                            sum_plot_no_compress[i] =
+                                (Complex64::ONE - h_static_sum + h_total_gain_only).norm();
                         }
                     }
-                });
-
-            for i in 0..NUM_OF_FILTER_POINTS {
-                let mut h_total_filtered = Complex64::ZERO;
-                let mut h_static_sum = Complex64::ZERO;
-                let mut h_total_gain_only = Complex64::ZERO;
-                for (idx, comp_filt) in self.comp_filt_state.iter().enumerate() {
-                    //TODO: all of these enables should be downstreamed to the struct and read from there.
-                    if self.params.comps[idx].enable.value() {
-                        let gain = self.params.comps[idx].gain.value() as f64;
-                        let comp_as_gain = nih_plug::util::db_to_gain_fast(
-                            -comp_filt[0].comp.curr_reduction_post_model,
-                        ) as f64;
-
-                        h_total_filtered += main_filters[idx][i] * comp_as_gain * gain;
-                        h_static_sum += main_filters[idx][i];
-
-                        h_total_gain_only += main_filters[idx][i] * gain;
-                    }
-
-                    {
-                        let sum_plot = uidata.borrow_filter_shape(3 * MAX_MBCS).unwrap();
-                        sum_plot[i] = (Complex64::ONE - h_static_sum + h_total_filtered).norm();
-                    }
-                    {
-                        let sum_plot_no_compress =
-                            uidata.borrow_filter_shape(3 * MAX_MBCS - 1).unwrap();
-                        sum_plot_no_compress[i] =
-                            (Complex64::ONE - h_static_sum + h_total_gain_only).norm();
-                    }
-                }
-            }
-
-            // GAIN REDUCTION
-            for i in 0..MAX_MBCS {
-                uidata.gain_reduction[i] =
-                    self.comp_filt_state[i][0].comp.curr_reduction_post_model;
-            }
-
-            // SPECTURM
-            if self.spectrum_handle.samples_in_buf >= NUM_OF_VIZ_FFT_POINTS {
-                let spectrum_pre = self
-                    .spectrum_handle
-                    .pre_comp_stft_handle
-                    .process_block_to_spectrum(0);
-                let spectrum_post = self
-                    .spectrum_handle
-                    .post_comp_stft_handle
-                    .process_block_to_spectrum(0);
-
-                for i in 0..NUM_OF_VIZ_FFT_POINTS / 2 {
-                    uidata.prev_spectrogram_pre[i] = uidata.signal_spectrogram_pre[i];
-                    uidata.signal_spectrogram_pre[i] =
-                        spectrum_pre[i].norm() / (NUM_OF_VIZ_FFT_POINTS / 2) as f32;
-                    uidata.prev_spectrogram_post[i] = uidata.signal_spectrogram_post[i];
-                    uidata.signal_spectrogram_post[i] =
-                        spectrum_post[i].norm() / (NUM_OF_VIZ_FFT_POINTS / 2) as f32;
                 }
 
-                self.spectrum_handle.samples_in_buf = 0;
-                self.spectrum_handle
-                    .pre_comp_stft_handle
-                    .move_input(NUM_OF_VIZ_FFT_POINTS);
-                self.spectrum_handle
-                    .post_comp_stft_handle
-                    .move_input(NUM_OF_VIZ_FFT_POINTS);
+                // GAIN REDUCTION
+                for i in 0..MAX_MBCS {
+                    uidata.gain_reduction[i] =
+                        self.comp_filt_state[i][0].comp.curr_reduction_post_model;
+                }
+
+                // SPECTURM
+                if self.spectrum_handle.samples_in_buf >= NUM_OF_VIZ_FFT_POINTS {
+                    let spectrum_pre = self
+                        .spectrum_handle
+                        .pre_comp_stft_handle
+                        .process_block_to_spectrum(0);
+                    let spectrum_post = self
+                        .spectrum_handle
+                        .post_comp_stft_handle
+                        .process_block_to_spectrum(0);
+
+                    for i in 0..NUM_OF_VIZ_FFT_POINTS / 2 {
+                        uidata.prev_spectrogram_pre[i] = uidata.signal_spectrogram_pre[i];
+                        uidata.signal_spectrogram_pre[i] =
+                            spectrum_pre[i].norm() / (NUM_OF_VIZ_FFT_POINTS / 2) as f32;
+                        uidata.prev_spectrogram_post[i] = uidata.signal_spectrogram_post[i];
+                        uidata.signal_spectrogram_post[i] =
+                            spectrum_post[i].norm() / (NUM_OF_VIZ_FFT_POINTS / 2) as f32;
+                    }
+
+                    self.spectrum_handle.samples_in_buf = 0;
+                    self.spectrum_handle
+                        .pre_comp_stft_handle
+                        .move_input(NUM_OF_VIZ_FFT_POINTS);
+                    self.spectrum_handle
+                        .post_comp_stft_handle
+                        .move_input(NUM_OF_VIZ_FFT_POINTS);
+                }
             }
         }
 
@@ -621,19 +624,22 @@ impl Plugin for OpenMbc {
             //write peak meter value
         }
         if self.spectrum_handle.samples_in_buf < NUM_OF_VIZ_FFT_POINTS {
-            self.spectrum_handle.pre_comp_stft_handle.write_input(
-                0,
-                self.spectrum_handle.samples_in_buf,
-                samples_to_copy,
-                &buf_pre,
-            );
-            self.spectrum_handle.post_comp_stft_handle.write_input(
-                0,
-                self.spectrum_handle.samples_in_buf,
-                samples_to_copy,
-                &buf_post,
-            );
-            self.spectrum_handle.samples_in_buf += samples_to_copy;
+            if self.params.editor_state.is_open() {
+                self.spectrum_handle.pre_comp_stft_handle.write_input(
+                    0,
+                    self.spectrum_handle.samples_in_buf,
+                    samples_to_copy,
+                    &buf_pre,
+                );
+                self.spectrum_handle.post_comp_stft_handle.write_input(
+                    0,
+                    self.spectrum_handle.samples_in_buf,
+                    samples_to_copy,
+                    &buf_post,
+                );
+
+                self.spectrum_handle.samples_in_buf += samples_to_copy;
+            }
         }
 
         ProcessStatus::Normal
