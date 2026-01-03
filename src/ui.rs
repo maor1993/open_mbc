@@ -16,7 +16,7 @@ use nih_plug::{
 };
 use nih_plug_egui::{
     create_egui_editor,
-    egui::{self, widgets::ProgressBar, Color32, Vec2},
+    egui::{self, widgets::ProgressBar, Color32, FontId, RichText, Vec2},
     resizable_window::ResizableWindow,
     EguiState,
 };
@@ -302,8 +302,34 @@ pub fn build_editor(
             ResizableWindow::new("res-wind")
                 .min_size(Vec2::new(640.0, 480.0))
                 .show(egui_ctx, egui_state.as_ref(), |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.heading("Open Multi Band Compressor");
+                    ui.horizontal(|ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.set_max_width(480.0);
+                            ui.heading("Open Multi Band Compressor");
+                        });
+
+                        let cargo_version = env!("CARGO_PKG_VERSION");
+                        let git_commit_sha: String =
+                            env!("VERGEN_GIT_SHA").chars().take(7).collect();
+
+                        let git_dirty_str = match option_env!("VERGEN_GIT_DIRTY") {
+                            Some(x) => {
+                                if x == "true" {
+                                    "-dirty"
+                                } else {
+                                    ""
+                                }
+                            }
+                            None => "",
+                        };
+
+                        ui.label(
+                            RichText::new(format!(
+                                "{}-{}{}",
+                                cargo_version, git_commit_sha, git_dirty_str
+                            ))
+                            .font(FontId::proportional(10.0)),
+                        );
                     });
                     let window_height = ui.available_height();
                     // create_state_tooltip(ui, &params, &ui_data, setter);

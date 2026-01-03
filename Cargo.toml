@@ -13,6 +13,10 @@ members = ["xtask"]
 [lib]
 crate-type = ["lib","cdylib"]
 
+[build-dependencies]
+anyhow = "1.0.100"
+vergen-git2 = { version = "1.0.7", features = ["build", "cargo", "rustc", "si"] }
+
 [dependencies]
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev="28b149ec4d62757d0b448809148a0c3ca6e09a95", features = [
     "assert_process_allocs",
