@@ -67,6 +67,9 @@ struct CompParams {
     #[id = "threshold"]
     pub threshold: FloatParam,
 
+    #[id = "range"]
+    pub range: FloatParam,
+
     #[id = "ratio"]
     pub ratio: FloatParam,
 
@@ -152,6 +155,19 @@ impl Default for CompParams {
                 util::db_to_gain(0.0),
                 FloatRange::Skewed {
                     min: util::db_to_gain(-99.0),
+                    max: util::db_to_gain(0.0),
+                    factor: 0.7,
+                },
+            )
+            .with_smoother(SmoothingStyle::Logarithmic(50.0))
+            .with_unit(" dB")
+            .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
+            .with_string_to_value(formatters::s2v_f32_gain_to_db()),
+            range: FloatParam::new(
+                "Range",
+                util::db_to_gain(-10.0),
+                FloatRange::Skewed {
+                    min: util::db_to_gain(-30.0),
                     max: util::db_to_gain(0.0),
                     factor: 0.7,
                 },
@@ -376,7 +392,7 @@ impl Plugin for OpenMbc {
                         for i in 0..NUM_OF_FILTER_POINTS {
                             filt_plot[i] = (Complex64::ONE - main_filter_mag[i]
                                 + main_filter_mag[i]
-                                    * (nih_plug::util::db_to_gain_fast(-10.0) * gain) as f64)
+                                    * (self.params.comps[idx].range.value() * gain) as f64)
                                 .norm()
                         }
                     }
@@ -525,6 +541,10 @@ impl Plugin for OpenMbc {
                     if this_comp_params.threshold.smoothed.is_smoothing() {
                         comp_filt[ch].comp.solver.threshold =
                             gain_to_db_fast(this_comp_params.threshold.smoothed.next());
+                    }
+                    if this_comp_params.range.smoothed.is_smoothing() {
+                        comp_filt[ch].comp.max_reduciton =
+                            -gain_to_db_fast(this_comp_params.range.smoothed.next());
                     }
 
                     //TODO: missing params - knee width, compressor type, filter type

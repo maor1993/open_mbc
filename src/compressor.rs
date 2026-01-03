@@ -11,6 +11,7 @@ use crate::compressor::{models::CompressionEmulationEnum, process::CurveType};
 pub struct Compressor {
     bypass: bool,
     curr_reduction: f32,
+    pub max_reduciton: f32,
     pub curr_reduction_post_model: f32,
     makeup_gain_db: f32,
     curve_type: CurveType,
@@ -22,6 +23,7 @@ impl Compressor {
     pub fn new(sample_rate: f32) -> Self {
         Compressor {
             bypass: false,
+            max_reduciton: 10.0,
             curr_reduction: 0.0,
             curr_reduction_post_model: 0.0,
             makeup_gain_db: 0.0,
@@ -52,10 +54,10 @@ impl Compressor {
             .compressor_model
             .get_gain_reduction(output_reduction, ideal_reduction);
 
-        //step 4: filtering
-        //TODO
-        self.curr_reduction_post_model = model_reduciton;
-        return model_reduciton;
+        let final_reduction = model_reduciton.min(self.max_reduciton);
+
+        self.curr_reduction_post_model = final_reduction;
+        return final_reduction;
     }
 
     pub fn process(&mut self, smp: f32, sidechain: Option<f32>) -> f32 {
@@ -340,7 +342,7 @@ mod tests {
         use super::models::CompressionEmulationEnum;
         let mut comp = Compressor::new(44100.0);
 
-        comp.solver.threshold = -25.0;
+        comp.solver.threshold = -45.0;
         comp.solver.update_ratio(12.0);
         comp.curve_type = super::process::CurveType::LogSmoothBranching;
         comp.solver.update_attack(5.0);

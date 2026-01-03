@@ -210,6 +210,7 @@ fn create_state_tooltip(
                     .desired_width(300.0),
             );
         });
+        ui.label("filter");
         ui.horizontal(|ui| {
             let mut octaves = params.comps[idx].q.value();
             ui.add(
@@ -237,6 +238,32 @@ fn create_state_tooltip(
                     .with_label("Gain[dB]", egui_knob::LabelPosition::Bottom),
             );
             update_param!(setter, &params.comps[idx].gain, db_to_gain_fast(gain));
+        });
+        ui.label("compressor");
+        ui.horizontal(|ui| {
+            let mut threshold = gain_to_db_fast(params.comps[idx].threshold.value());
+            ui.add(
+                Knob::new(&mut threshold, -60.0, 0.0, egui_knob::KnobStyle::Wiper)
+                    .with_label("Threshold", egui_knob::LabelPosition::Bottom),
+            );
+            update_param!(
+                setter,
+                &params.comps[idx].threshold,
+                db_to_gain_fast(threshold)
+            );
+            let mut range = gain_to_db_fast(params.comps[idx].range.value());
+            ui.add(
+                Knob::new(&mut range, -30.0, 0.0, egui_knob::KnobStyle::Wiper)
+                    .with_label("Range", egui_knob::LabelPosition::Bottom),
+            );
+            update_param!(setter, &params.comps[idx].range, db_to_gain_fast(range));
+
+            let mut ratio = params.comps[idx].ratio.value();
+            ui.add(
+                Knob::new(&mut ratio, 1.0, 10.0, egui_knob::KnobStyle::Wiper)
+                    .with_label("Ratio", egui_knob::LabelPosition::Bottom),
+            );
+            update_param!(setter, &params.comps[idx].ratio, ratio);
 
             let mut attack = params.comps[idx].attack.value();
             ui.add(
@@ -254,25 +281,6 @@ fn create_state_tooltip(
                     .with_label_format(|x| format!("{:.0}", x)), // .with_step(Some(1.0)),
             );
             update_param!(setter, &params.comps[idx].release, release);
-        });
-        ui.horizontal(|ui| {
-            let mut threshold = gain_to_db_fast(params.comps[idx].threshold.value());
-            ui.add(
-                Knob::new(&mut threshold, -60.0, 0.0, egui_knob::KnobStyle::Wiper)
-                    .with_label("Threshold", egui_knob::LabelPosition::Bottom),
-            );
-            update_param!(
-                setter,
-                &params.comps[idx].threshold,
-                db_to_gain_fast(threshold)
-            );
-
-            let mut ratio = params.comps[idx].ratio.value();
-            ui.add(
-                Knob::new(&mut ratio, 1.0, 10.0, egui_knob::KnobStyle::Wiper)
-                    .with_label("Ratio", egui_knob::LabelPosition::Bottom),
-            );
-            update_param!(setter, &params.comps[idx].ratio, ratio);
 
             let mut sidechain = params.comps[idx].sidechain.value();
 
