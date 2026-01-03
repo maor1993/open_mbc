@@ -15,6 +15,7 @@ use crossover::Crossover;
 
 mod ui;
 use ui::build_editor;
+use ui::PeakMeter;
 use ui::UiData;
 
 use nih_plug_egui::EguiState;
@@ -29,6 +30,8 @@ pub struct OpenMbc {
     comp_filt_state: [[CompFilter; 2]; MAX_MBCS], //stereo channel per compressor
     ui_data: Arc<Mutex<UiData>>,
     spectrum_handle: SpecturmSubSystem,
+    peak_meter: [ui::PeakMeter; 2],
+    peak_meter_result: Arc<[AtomicF32; 2]>,
 }
 
 #[derive(Params)]
@@ -217,6 +220,8 @@ impl Default for OpenMbc {
             }),
             ui_data: Arc::new(Mutex::new(UiData::default())),
             spectrum_handle: SpecturmSubSystem::new(),
+            peak_meter: std::array::from_fn(|_| PeakMeter::new()),
+            peak_meter_result: Arc::new([AtomicF32::new(0.0), AtomicF32::new(0.0)]),
         }
     }
 }
@@ -289,17 +294,21 @@ impl Plugin for OpenMbc {
     fn initialize(
         &mut self,
         _audio_io_layout: &AudioIOLayout,
-        _buffer_config: &BufferConfig,
+        buffer_config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
         // Resize buffers and perform other potentially expensive initialization operations here.
         // The `reset()` function is always called right after this function. You can remove this
         // function if you do not need it.
-        self.sample_rate = _buffer_config.sample_rate;
+        self.sample_rate = buffer_config.sample_rate;
 
         {
             let mut uidata = self.ui_data.lock().unwrap();
             uidata.sample_rate = self.sample_rate;
+
+            for peakmeter in self.peak_meter.iter_mut() {
+                peakmeter.update_decay(ui::PEAK_METER_DECAY_MS, self.sample_rate);
+            }
         }
         self.spectrum_handle.configure();
 
@@ -331,7 +340,8 @@ impl Plugin for OpenMbc {
         let params = self.params.clone();
         let egui_state = params.editor_state.clone();
         let ui_data = self.ui_data.clone();
-        build_editor(params, egui_state, ui_data)
+        let pmv = self.peak_meter_result.clone();
+        build_editor(params, egui_state, ui_data, pmv)
     }
 
     fn process(
@@ -452,7 +462,6 @@ impl Plugin for OpenMbc {
             let mut mid_side = [0.0, 0.0];
             let mut left_right = [0.0, 0.0];
             let mut aux_left_right = [0.0, 0.0];
-
             //create mid side version (cheaper to do it always)
             // as in mid = L+R, side = L-R
             for (ch, (sample, aux)) in channel_samples.iter_mut().zip(aux_samples).enumerate() {
@@ -584,7 +593,12 @@ impl Plugin for OpenMbc {
                 } else {
                     *sample = mid_side[ch];
                 }
+
+                let peak_result = self.peak_meter[ch].step(sample.abs());
+                self.peak_meter_result[ch].store(peak_result, std::sync::atomic::Ordering::Relaxed);
             }
+
+            //write peak meter value
         }
         if self.spectrum_handle.samples_in_buf < NUM_OF_VIZ_FFT_POINTS {
             self.spectrum_handle.pre_comp_stft_handle.write_input(

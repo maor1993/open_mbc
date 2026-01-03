@@ -11,7 +11,7 @@ use splines::{self, Key};
 use nih_plug::{
     editor::Editor,
     log::info,
-    prelude::ParamSetter,
+    prelude::{AtomicF32, ParamSetter},
     util::{db_to_gain_fast, gain_to_db_fast},
 };
 use nih_plug_egui::{
@@ -77,6 +77,43 @@ pub fn get_frequencies_log10() -> &'static [f64; NUM_OF_FILTER_POINTS] {
 }
 
 pub mod utils;
+pub const PEAK_METER_DECAY_MS: f32 = 150.0;
+
+mod volumemeter;
+
+use volumemeter::VolumeMeter;
+#[derive(Default, Debug)]
+pub struct PeakMeter {
+    current: f32,
+    highest: f32,
+    decay_normalized: f32,
+}
+impl PeakMeter {
+    pub fn new() -> Self {
+        Self {
+            ..Default::default()
+        }
+    }
+
+    pub fn update_decay(&mut self, decay_msec: f32, sample_rate: f32) {
+        let decay_samples = sample_rate * decay_msec / 1000.0;
+
+        self.decay_normalized = 0.25_f32.powf(1.0 / decay_samples);
+    }
+
+    pub fn step(&mut self, sample: f32) -> f32 {
+        let current = if sample > self.current {
+            self.highest = sample;
+            sample
+        } else {
+            self.current * self.decay_normalized + sample * (1.0 - self.decay_normalized)
+        };
+        self.current = current;
+
+        current
+    }
+}
+
 pub struct UiData {
     curr_mbc_idx: usize,
     pub sample_rate: f32,
@@ -250,6 +287,7 @@ pub fn build_editor(
     params: Arc<OpenMbcParams>,
     egui_state: Arc<EguiState>,
     ui_data: Arc<Mutex<UiData>>,
+    peak_meter_val: Arc<[AtomicF32; 2]>,
 ) -> Option<Box<dyn Editor>> {
     create_egui_editor(
         egui_state.clone(),
@@ -258,182 +296,187 @@ pub fn build_editor(
         |_, _, _| {},
         move |egui_ctx, setter, _queue, _state| {
             ResizableWindow::new("res-wind")
-                .min_size(Vec2::new(480.0, 480.0))
+                .min_size(Vec2::new(640.0, 480.0))
                 .show(egui_ctx, egui_state.as_ref(), |ui| {
-                    ui.vertical(|ui| {
-                        ui.vertical_centered(|ui| ui.heading("Open Multi Band Compressor"));
+                    ui.vertical_centered(|ui| {
+                        ui.heading("Open Multi Band Compressor");
+                    });
+                    let window_height = ui.available_height();
+                    // create_state_tooltip(ui, &params, &ui_data, setter);
+                    let resp = ui.horizontal(|ui| {
+                        ui.set_min_height(window_height - 20.0);
 
-                        // create_state_tooltip(ui, &params, &ui_data, setter);
-                        let resp = ui.vertical_centered(|ui| {
-                            let plot = Plot::new("eq_plot")
-                                .height(ui.available_height() - 50.0)
-                                .allow_zoom(false)
-                                .allow_drag(false)
-                                .allow_scroll(false)
-                                .show_axes([true, true])
-                                .x_grid_spacer(|input| {
-                                    let mut marks = Vec::new();
+                        // Add the volume meter
 
-                                    // Calculate the range of powers of 10 visible in the current view
-                                    let start_pow = input.bounds.0.floor() as i32;
-                                    let end_pow = input.bounds.1.ceil() as i32;
+                        let sig0 = gain_to_db_fast(
+                            peak_meter_val[0].load(std::sync::atomic::Ordering::Relaxed),
+                        );
+                        let sig1 = gain_to_db_fast(
+                            peak_meter_val[1].load(std::sync::atomic::Ordering::Relaxed),
+                        );
+                        ui.add(VolumeMeter::new(&sig0, MIN_POWER_DB as f32, 6.0).width(15.0));
+                        ui.add(VolumeMeter::new(&sig1, MIN_POWER_DB as f32, 6.0).width(15.0));
 
-                                    for pow in start_pow..=end_pow {
-                                        let base = 10.0f64.powi(pow);
+                        let plot = Plot::new("eq_plot")
+                            .height(ui.available_height())
+                            .allow_zoom(false)
+                            .allow_drag(false)
+                            .allow_scroll(false)
+                            .show_axes([true, true])
+                            .x_grid_spacer(|input| {
+                                let mut marks = Vec::new();
 
-                                        // Major tick (the power of 10)
+                                // Calculate the range of powers of 10 visible in the current view
+                                let start_pow = input.bounds.0.floor() as i32;
+                                let end_pow = input.bounds.1.ceil() as i32;
+
+                                for pow in start_pow..=end_pow {
+                                    let base = 10.0f64.powi(pow);
+
+                                    // Major tick (the power of 10)
+                                    marks.push(egui_plot::GridMark {
+                                        value: pow as f64,
+                                        step_size: 1.0, // Used by egui to determine line thickness
+                                    });
+
+                                    // Only draw if we aren't zoomed out too far to keep the UI clean
+                                    for i in 2..10 {
+                                        let val = (i as f64 * base).log10();
+
+                                        let step_size = if i == 2 || i == 5 { 0.3 } else { 0.1 };
+
                                         marks.push(egui_plot::GridMark {
-                                            value: pow as f64,
-                                            step_size: 1.0, // Used by egui to determine line thickness
+                                            value: val,
+                                            step_size: step_size, // Thinner lines
                                         });
-
-                                        // Only draw if we aren't zoomed out too far to keep the UI clean
-                                        for i in 2..10 {
-                                            let val = (i as f64 * base).log10();
-
-                                            let step_size =
-                                                if i == 2 || i == 5 { 0.3 } else { 0.1 };
-
-                                            marks.push(egui_plot::GridMark {
-                                                value: val,
-                                                step_size: step_size, // Thinner lines
-                                            });
-                                        }
                                     }
-                                    marks
-                                })
-                                .x_axis_formatter(|mark, _range| {
-                                    // Convert the log value back to a readable string (e.g., 10, 100, 1000)
+                                }
+                                marks
+                            })
+                            .x_axis_formatter(|mark, _range| {
+                                // Convert the log value back to a readable string (e.g., 10, 100, 1000)
 
-                                    let res = 10.0f64.powf(mark.value);
+                                let res = 10.0f64.powf(mark.value);
 
-                                    if res >= 1000.0 {
-                                        format!("{:.0}k", res / 1000.0)
-                                    } else {
-                                        format!("{:.0}", res)
-                                    }
-                                })
-                                .label_formatter(|_, value| {
-                                    format!(
-                                        "freq:{:.0}\nGain:{:.2}",
-                                        10.0_f64.powf(value.x),
-                                        value.y
-                                    )
-                                });
-                            // .label_formatter(|_, _| "".to_owned()); // Disable default tooltip
-                            let resp = plot.show(ui, |plot_ui| {
-                                plot_ui.set_plot_bounds(egui_plot::PlotBounds::from_min_max(
-                                    [FREQ_RANGE_MIN_LOG10, MIN_POWER_DB as f64],
-                                    [FREQ_RANGE_MAX_LOG10, MAX_POWER_DB as f64],
-                                ));
+                                if res >= 1000.0 {
+                                    format!("{:.0}k", res / 1000.0)
+                                } else {
+                                    format!("{:.0}", res)
+                                }
+                            })
+                            .label_formatter(|_, value| {
+                                format!("freq:{:.0}\nGain:{:.2}", 10.0_f64.powf(value.x), value.y)
+                            });
+                        // .label_formatter(|_, _| "".to_owned()); // Disable default tooltip
+                        let resp = plot.show(ui, |plot_ui| {
+                            plot_ui.set_plot_bounds(egui_plot::PlotBounds::from_min_max(
+                                [FREQ_RANGE_MIN_LOG10, MIN_POWER_DB as f64],
+                                [FREQ_RANGE_MAX_LOG10, MAX_POWER_DB as f64],
+                            ));
+                            {
+                                let uidata = ui_data.lock().unwrap();
+
+                                let main_line_shape_db: [f64; NUM_OF_FILTER_POINTS] =
+                                    std::array::from_fn(|i| {
+                                        nih_plug::util::gain_to_db_fast(
+                                            uidata.filter_shapes[3 * MAX_MBCS - 1][i] as f32,
+                                        ) as f64
+                                    });
+                                for (filter_idx, filter_shape) in
+                                    uidata.filter_shapes.iter().enumerate()
                                 {
-                                    let uidata = ui_data.lock().unwrap();
-
-                                    let main_line_shape_db: [f64; NUM_OF_FILTER_POINTS] =
-                                        std::array::from_fn(|i| {
-                                            nih_plug::util::gain_to_db_fast(
-                                                uidata.filter_shapes[3 * MAX_MBCS - 1][i] as f32,
-                                            ) as f64
-                                        });
-                                    for (filter_idx, filter_shape) in
-                                        uidata.filter_shapes.iter().enumerate()
-                                    {
-                                        //FIXME: ffs write a normal function
-                                        if filter_idx == 3 * MAX_MBCS - 1 {
-                                            continue;
-                                        }
-
-                                        let freq_bins = get_frequencies_log10();
-                                        let filter_shape_db: [f64; NUM_OF_FILTER_POINTS] =
-                                            std::array::from_fn(|i| {
-                                                nih_plug::util::gain_to_db_fast(
-                                                    filter_shape[i] as f32,
-                                                )
-                                                    as f64
-                                            });
-
-                                        //skip all empty filter shapes
-                                        if filter_shape[0] == 0.0 {
-                                            continue;
-                                        }
-                                        let points: egui_plot::PlotPoints = freq_bins
-                                            .iter()
-                                            .zip(filter_shape_db)
-                                            .map(|(&x, y)| [x, y])
-                                            .collect();
-
-                                        let color = match filter_idx {
-                                            0..MAX_MBCS => COLOR_BASELINE[filter_idx],
-                                            _ => COLOR_COMP_LINE,
-                                        };
-
-                                        let line = egui_plot::Line::new("", points)
-                                            .color(color)
-                                            .width(2.0);
-                                        //TODO: this is a kombina for now
-                                        if (0..MAX_MBCS).contains(&filter_idx) {
-                                            // let filter_shape_min:Vec<f64> = filter_shape_db.iter().zip(main_line_shape_db).map(|(&y,main)| y-main).collect();
-                                            // let filter_shape_max:[f64;NUM_OF_FILTER_POINTS] = filter_shape_db;
-
-                                            let filledarea = egui_plot::FilledArea::new(
-                                                format!("filter {}", filter_idx),
-                                                freq_bins,
-                                                &filter_shape_db,
-                                                &main_line_shape_db,
-                                            )
-                                            .fill_color(
-                                                COLOR_BASELINE[filter_idx].gamma_multiply_u8(40),
-                                            );
-
-                                            plot_ui.add(filledarea);
-                                        } else {
-                                            plot_ui.line(line);
-                                        }
+                                    //FIXME: ffs write a normal function
+                                    if filter_idx == 3 * MAX_MBCS - 1 {
+                                        continue;
                                     }
 
-                                    //draw stft graph
-                                    //TODO: no need to recalculate this every time, only on sample rate updates
-                                    let mut fft_freqs: [f64; NUM_OF_VIZ_FFT_POINTS / 2] =
+                                    let freq_bins = get_frequencies_log10();
+                                    let filter_shape_db: [f64; NUM_OF_FILTER_POINTS] =
                                         std::array::from_fn(|i| {
-                                            (uidata.sample_rate as f64 * i as f64
-                                                / NUM_OF_VIZ_FFT_POINTS as f64)
-                                                .log10()
+                                            nih_plug::util::gain_to_db_fast(filter_shape[i] as f32)
+                                                as f64
                                         });
-                                    fft_freqs[0] = 1.0;
 
-                                    // let points_pre: egui_plot::PlotPoints = (0
-                                    //     ..NUM_OF_VIZ_FFT_POINTS / 2)
-                                    //     .map(|i| {
-                                    //         let x = fft_freqs[i];
-                                    //         let y = nih_plug::util::gain_to_db_fast(
-                                    //             uidata.signal_spectrogram_pre[i],
-                                    //         );
+                                    //skip all empty filter shapes
+                                    if filter_shape[0] == 0.0 {
+                                        continue;
+                                    }
+                                    let points: egui_plot::PlotPoints = freq_bins
+                                        .iter()
+                                        .zip(filter_shape_db)
+                                        .map(|(&x, y)| [x, y])
+                                        .collect();
 
-                                    //         [x, y as f64]
-                                    //     })
-                                    //     .collect();
-                                    const SPECTROGRAM_ALPHA: f32 = 0.85;
-                                    const INTERPOLATION_SIZE: usize = 4;
+                                    let color = match filter_idx {
+                                        0..MAX_MBCS => COLOR_BASELINE[filter_idx],
+                                        _ => COLOR_COMP_LINE,
+                                    };
 
-                                    let points_pre = splines::Spline::from_vec(
-                                        (0..NUM_OF_VIZ_FFT_POINTS / 2)
-                                            .map(|i| {
-                                                let x = fft_freqs[i];
-                                                let y = nih_plug::util::gain_to_db_fast(
-                                                    uidata.prev_spectrogram_pre[i]
-                                                        * SPECTROGRAM_ALPHA
-                                                        + (1.0 - SPECTROGRAM_ALPHA)
-                                                            * uidata.signal_spectrogram_pre[i],
-                                                )
-                                                    as f64;
+                                    let line =
+                                        egui_plot::Line::new("", points).color(color).width(2.0);
+                                    //TODO: this is a kombina for now
+                                    if (0..MAX_MBCS).contains(&filter_idx) {
+                                        // let filter_shape_min:Vec<f64> = filter_shape_db.iter().zip(main_line_shape_db).map(|(&y,main)| y-main).collect();
+                                        // let filter_shape_max:[f64;NUM_OF_FILTER_POINTS] = filter_shape_db;
 
-                                                Key::new(x, y, splines::Interpolation::Cosine)
-                                            })
-                                            .collect(),
-                                    );
+                                        let filledarea = egui_plot::FilledArea::new(
+                                            format!("filter {}", filter_idx),
+                                            freq_bins,
+                                            &filter_shape_db,
+                                            &main_line_shape_db,
+                                        )
+                                        .fill_color(
+                                            COLOR_BASELINE[filter_idx].gamma_multiply_u8(40),
+                                        );
 
-                                    let points_pre: egui_plot::PlotPoints = (0
-                                        ..(NUM_OF_VIZ_FFT_POINTS * INTERPOLATION_SIZE / 2))
+                                        plot_ui.add(filledarea);
+                                    } else {
+                                        plot_ui.line(line);
+                                    }
+                                }
+
+                                //draw stft graph
+                                //TODO: no need to recalculate this every time, only on sample rate updates
+                                let mut fft_freqs: [f64; NUM_OF_VIZ_FFT_POINTS / 2] =
+                                    std::array::from_fn(|i| {
+                                        (uidata.sample_rate as f64 * i as f64
+                                            / NUM_OF_VIZ_FFT_POINTS as f64)
+                                            .log10()
+                                    });
+                                fft_freqs[0] = 1.0;
+
+                                // let points_pre: egui_plot::PlotPoints = (0
+                                //     ..NUM_OF_VIZ_FFT_POINTS / 2)
+                                //     .map(|i| {
+                                //         let x = fft_freqs[i];
+                                //         let y = nih_plug::util::gain_to_db_fast(
+                                //             uidata.signal_spectrogram_pre[i],
+                                //         );
+
+                                //         [x, y as f64]
+                                //     })
+                                //     .collect();
+                                const SPECTROGRAM_ALPHA: f32 = 0.85;
+                                const INTERPOLATION_SIZE: usize = 4;
+
+                                let points_pre = splines::Spline::from_vec(
+                                    (0..NUM_OF_VIZ_FFT_POINTS / 2)
+                                        .map(|i| {
+                                            let x = fft_freqs[i];
+                                            let y = nih_plug::util::gain_to_db_fast(
+                                                uidata.prev_spectrogram_pre[i] * SPECTROGRAM_ALPHA
+                                                    + (1.0 - SPECTROGRAM_ALPHA)
+                                                        * uidata.signal_spectrogram_pre[i],
+                                            )
+                                                as f64;
+
+                                            Key::new(x, y, splines::Interpolation::Cosine)
+                                        })
+                                        .collect(),
+                                );
+
+                                let points_pre: egui_plot::PlotPoints =
+                                    (0..(NUM_OF_VIZ_FFT_POINTS * INTERPOLATION_SIZE / 2))
                                         .map(|i| {
                                             let x = (uidata.sample_rate as f64 * i as f64
                                                 / ((NUM_OF_VIZ_FFT_POINTS * INTERPOLATION_SIZE)
@@ -446,25 +489,24 @@ pub fn build_editor(
                                         })
                                         .collect();
 
-                                    let points_post = splines::Spline::from_vec(
-                                        (0..NUM_OF_VIZ_FFT_POINTS / 2)
-                                            .map(|i| {
-                                                let x = fft_freqs[i];
-                                                let y = nih_plug::util::gain_to_db_fast(
-                                                    uidata.prev_spectrogram_post[i]
-                                                        * SPECTROGRAM_ALPHA
-                                                        + (1.0 - SPECTROGRAM_ALPHA)
-                                                            * uidata.signal_spectrogram_post[i],
-                                                )
-                                                    as f64;
+                                let points_post = splines::Spline::from_vec(
+                                    (0..NUM_OF_VIZ_FFT_POINTS / 2)
+                                        .map(|i| {
+                                            let x = fft_freqs[i];
+                                            let y = nih_plug::util::gain_to_db_fast(
+                                                uidata.prev_spectrogram_post[i] * SPECTROGRAM_ALPHA
+                                                    + (1.0 - SPECTROGRAM_ALPHA)
+                                                        * uidata.signal_spectrogram_post[i],
+                                            )
+                                                as f64;
 
-                                                Key::new(x, y, splines::Interpolation::Cosine)
-                                            })
-                                            .collect(),
-                                    );
+                                            Key::new(x, y, splines::Interpolation::Cosine)
+                                        })
+                                        .collect(),
+                                );
 
-                                    let points_post: egui_plot::PlotPoints = (0
-                                        ..NUM_OF_VIZ_FFT_POINTS * INTERPOLATION_SIZE / 2)
+                                let points_post: egui_plot::PlotPoints =
+                                    (0..NUM_OF_VIZ_FFT_POINTS * INTERPOLATION_SIZE / 2)
                                         .map(|i| {
                                             let x = (uidata.sample_rate as f64 * i as f64
                                                 / ((NUM_OF_VIZ_FFT_POINTS * INTERPOLATION_SIZE)
@@ -476,206 +518,193 @@ pub fn build_editor(
                                         })
                                         .collect();
 
-                                    let line = egui_plot::Line::new("stft_pre", points_pre)
-                                        .color(egui::Color32::from_rgb(200, 200, 200))
-                                        .width(2.0)
-                                        // .fill(MIN_POWER_DB as f32)
-                                        .fill_alpha(0.8);
-                                    plot_ui.line(line);
+                                let line = egui_plot::Line::new("stft_pre", points_pre)
+                                    .color(egui::Color32::from_rgb(200, 200, 200))
+                                    .width(2.0)
+                                    // .fill(MIN_POWER_DB as f32)
+                                    .fill_alpha(0.8);
+                                plot_ui.line(line);
 
-                                    let line = egui_plot::Line::new("stft_post", points_post)
-                                        .color(egui::Color32::from_rgb(200, 10, 20))
-                                        .width(1.0)
-                                        // .fill(MIN_POWER_DB as f32)
-                                        .fill_alpha(0.8);
-                                    plot_ui.line(line);
-                                }
+                                let line = egui_plot::Line::new("stft_post", points_post)
+                                    .color(egui::Color32::from_rgb(200, 10, 20))
+                                    .width(1.0)
+                                    // .fill(MIN_POWER_DB as f32)
+                                    .fill_alpha(0.8);
+                                plot_ui.line(line);
+                            }
 
-                                for i in 0..MAX_MBCS {
-                                    if params.comps[i].enable.value() {
-                                        let pnt = [
-                                            params.comps[i].center_freq.value().log10() as f64,
-                                            nih_plug::util::gain_to_db_fast(
-                                                params.comps[i].gain.value(),
-                                            ) as f64,
-                                        ];
-                                        let point_size =
-                                            if ui_data.lock().unwrap().curr_mbc_idx == i {
-                                                8.0
-                                            } else {
-                                                5.0
-                                            };
-                                        //FIXME: god damn this is some jank
-                                        if point_size == 8.0 {
-                                            plot_ui.points(
-                                                egui_plot::Points::new(
-                                                    format!("Filter {}", i),
-                                                    pnt,
-                                                )
+                            for i in 0..MAX_MBCS {
+                                if params.comps[i].enable.value() {
+                                    let pnt = [
+                                        params.comps[i].center_freq.value().log10() as f64,
+                                        nih_plug::util::gain_to_db_fast(
+                                            params.comps[i].gain.value(),
+                                        ) as f64,
+                                    ];
+                                    let point_size = if ui_data.lock().unwrap().curr_mbc_idx == i {
+                                        8.0
+                                    } else {
+                                        5.0
+                                    };
+                                    //FIXME: god damn this is some jank
+                                    if point_size == 8.0 {
+                                        plot_ui.points(
+                                            egui_plot::Points::new(format!("Filter {}", i), pnt)
                                                 .radius(point_size + 2.0)
                                                 .color(Color32::WHITE)
                                                 .filled(true),
-                                            );
-                                        }
-                                        plot_ui.points(
-                                            egui_plot::Points::new(format!("Filter {}", i), pnt)
-                                                .radius(point_size)
-                                                .color(COLOR_BASELINE[i])
-                                                .filled(true),
                                         );
-
-                                        let filt_min = (params.comps[i].center_freq.value()
-                                            / 2.0_f32.powf(params.comps[i].q.value() / 2.0))
-                                            as f64;
-                                        let filt_max = filt_min
-                                            * 2.0_f32.powf(params.comps[i].q.value()) as f64;
-                                        let span = egui_plot::Span::new(
-                                            format!("filter {}", i),
-                                            filt_min.log10()..=filt_max.log10(),
-                                        )
-                                        .fill(COLOR_BASELINE[i].gamma_multiply_u8(10));
-
-                                        plot_ui.span(span);
                                     }
+                                    plot_ui.points(
+                                        egui_plot::Points::new(format!("Filter {}", i), pnt)
+                                            .radius(point_size)
+                                            .color(COLOR_BASELINE[i])
+                                            .filled(true),
+                                    );
+
+                                    let filt_min = (params.comps[i].center_freq.value()
+                                        / 2.0_f32.powf(params.comps[i].q.value() / 2.0))
+                                        as f64;
+                                    let filt_max =
+                                        filt_min * 2.0_f32.powf(params.comps[i].q.value()) as f64;
+                                    let span = egui_plot::Span::new(
+                                        format!("filter {}", i),
+                                        filt_min.log10()..=filt_max.log10(),
+                                    )
+                                    .fill(COLOR_BASELINE[i].gamma_multiply_u8(10));
+
+                                    plot_ui.span(span);
                                 }
+                            }
 
-                                if plot_ui.response().clicked() {
-                                    if let Some(mouse_pos) = plot_ui.pointer_coordinate() {
-                                        let mut min_dist = f64::MAX;
-                                        let mut selected_idx: Option<usize> = None;
-                                        for i in 0..MAX_MBCS {
-                                            if !params.comps[i].enable.value() {
-                                                continue;
-                                            }
-
-                                            let dist = (mouse_pos.x
-                                                - params.comps[i].center_freq.value().log10()
-                                                    as f64)
-                                                .abs();
-
-                                            if (dist < min_dist) & (dist < 0.2) {
-                                                min_dist = dist;
-                                                selected_idx = Some(i);
-                                            }
+                            if plot_ui.response().clicked() {
+                                if let Some(mouse_pos) = plot_ui.pointer_coordinate() {
+                                    let mut min_dist = f64::MAX;
+                                    let mut selected_idx: Option<usize> = None;
+                                    for i in 0..MAX_MBCS {
+                                        if !params.comps[i].enable.value() {
+                                            continue;
                                         }
 
-                                        {
-                                            let mut uidata = ui_data.lock().unwrap();
+                                        let dist = (mouse_pos.x
+                                            - params.comps[i].center_freq.value().log10() as f64)
+                                            .abs();
 
-                                            match selected_idx {
-                                                Some(i) => {
-                                                    uidata.curr_mbc_idx = i;
-                                                }
-                                                None => {
-                                                    if let Some(idx) = params
-                                                        .comps
-                                                        .iter()
-                                                        .position(|x| !x.enable.value())
-                                                    {
-                                                        update_param!(
-                                                            setter,
-                                                            &params.comps[idx].enable,
-                                                            true
-                                                        );
-                                                        update_param!(
-                                                            setter,
-                                                            &params.comps[idx].center_freq,
-                                                            10.0_f32
-                                                                .powf(mouse_pos.x as f32)
-                                                                .round()
-                                                        );
+                                        if (dist < min_dist) & (dist < 0.2) {
+                                            min_dist = dist;
+                                            selected_idx = Some(i);
+                                        }
+                                    }
 
-                                                        uidata.curr_mbc_idx = idx;
-                                                    }
+                                    {
+                                        let mut uidata = ui_data.lock().unwrap();
+
+                                        match selected_idx {
+                                            Some(i) => {
+                                                uidata.curr_mbc_idx = i;
+                                            }
+                                            None => {
+                                                if let Some(idx) = params
+                                                    .comps
+                                                    .iter()
+                                                    .position(|x| !x.enable.value())
+                                                {
+                                                    update_param!(
+                                                        setter,
+                                                        &params.comps[idx].enable,
+                                                        true
+                                                    );
+                                                    update_param!(
+                                                        setter,
+                                                        &params.comps[idx].center_freq,
+                                                        10.0_f32.powf(mouse_pos.x as f32).round()
+                                                    );
+
+                                                    uidata.curr_mbc_idx = idx;
                                                 }
                                             }
                                         }
                                     }
                                 }
+                            }
 
-                                let selected_index = ui_data.lock().unwrap().curr_mbc_idx;
-                                if plot_ui.response().dragged() {
-                                    let drag_delta = plot_ui.response().drag_motion();
+                            let selected_index = ui_data.lock().unwrap().curr_mbc_idx;
+                            if plot_ui.response().dragged() {
+                                let drag_delta = plot_ui.response().drag_motion();
 
-                                    let new_center_freq = 10.0_f32.powf(
-                                        params.comps[selected_index].center_freq.value().log10()
-                                            + drag_delta.x * FREQ_STEP as f32,
-                                    );
+                                let new_center_freq = 10.0_f32.powf(
+                                    params.comps[selected_index].center_freq.value().log10()
+                                        + drag_delta.x * FREQ_STEP as f32,
+                                );
 
-                                    let new_gain = params.comps[selected_index].gain.value()
-                                        - drag_delta.y * 0.01;
-                                    // info!("drag delta :{:?} new freq: {} new gain: {}", drag_delta, new_center_freq,new_gain);
-                                    update_param!(
-                                        setter,
-                                        &params.comps[selected_index].center_freq,
-                                        new_center_freq
-                                    );
-                                    update_param!(
-                                        setter,
-                                        &params.comps[selected_index].gain,
-                                        new_gain
-                                    );
-                                }
-                            });
-                            resp
-                        });
-
-                        let selected_index = ui_data.lock().unwrap().curr_mbc_idx;
-                        let old_octaves = params.comps[selected_index].q.value();
-                        if resp.inner.response.hovered() {
-                            let delta = ui.input(|i| {
-                                i.events.iter().find_map(|e| match e {
-                                    egui::Event::MouseWheel { delta, .. } => Some(*delta),
-                                    _ => None,
-                                })
-                            });
-
-                            if let Some(delta) = delta {
+                                let new_gain =
+                                    params.comps[selected_index].gain.value() - drag_delta.y * 0.01;
+                                // info!("drag delta :{:?} new freq: {} new gain: {}", drag_delta, new_center_freq,new_gain);
                                 update_param!(
                                     setter,
-                                    &params.comps[selected_index].q,
-                                    old_octaves + delta.y * 0.1
+                                    &params.comps[selected_index].center_freq,
+                                    new_center_freq
                                 );
+                                update_param!(setter, &params.comps[selected_index].gain, new_gain);
                             }
-                        }
+                        });
 
-                        egui::Popup::menu(&resp.inner.response)
-                            .id(egui::Id::new("popup"))
-                            .align(egui::RectAlign::BOTTOM)
-                            .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
-                            .open(params.comps[selected_index].enable.value())
-                            .frame(
-                                egui::Frame::new().corner_radius(10).fill(
-                                    egui::Color32::BLACK.blend(
-                                        COLOR_BASELINE[selected_index].gamma_multiply_u8(60),
-                                    ),
-                                ),
-                            )
-                            .show(|ui| {
-                                create_state_tooltip(ui, &params, &ui_data, setter);
-                            });
-
-                        ui.vertical_centered(|ui| {
-                            ui.horizontal(|ui| {
-                                let mut checked = params.mid_side.value();
-
-                                ui.add(egui::widgets::Checkbox::new(&mut checked, "mid-side"));
-
-                                update_param!(setter, &params.mid_side, checked);
-
-                                let mut stereo_mix = params.stereo_mix.value();
-                                ui.label("Stereo Mix ");
-                                ui.add(
-                                    egui::widgets::DragValue::new(&mut stereo_mix)
-                                        .range(0.0..=1.0)
-                                        .speed(0.01)
-                                        .custom_formatter(|val, _| format!("{:.0}%", val * 100.0)),
-                                );
-                                update_param!(setter, &params.stereo_mix, stereo_mix);
+                        resp
+                    });
+                    let selected_index = ui_data.lock().unwrap().curr_mbc_idx;
+                    let old_octaves = params.comps[selected_index].q.value();
+                    if resp.inner.response.hovered() {
+                        let delta = ui.input(|i| {
+                            i.events.iter().find_map(|e| match e {
+                                egui::Event::MouseWheel { delta, .. } => Some(*delta),
+                                _ => None,
                             })
                         });
-                    });
+
+                        if let Some(delta) = delta {
+                            update_param!(
+                                setter,
+                                &params.comps[selected_index].q,
+                                old_octaves + delta.y * 0.1
+                            );
+                        }
+                    }
+
+                    egui::Popup::menu(&resp.inner.response)
+                        .id(egui::Id::new("popup"))
+                        .align(egui::RectAlign::BOTTOM)
+                        .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+                        .open(params.comps[selected_index].enable.value())
+                        .frame(
+                            egui::Frame::new().corner_radius(10).fill(
+                                egui::Color32::BLACK
+                                    .blend(COLOR_BASELINE[selected_index].gamma_multiply_u8(60)),
+                            ),
+                        )
+                        .show(|ui| {
+                            create_state_tooltip(ui, &params, &ui_data, setter);
+                        });
+
+                    ui.horizontal(|ui| {
+                        ui.set_min_height(15.0);
+                        let mut checked = params.mid_side.value();
+
+                        ui.add(egui::widgets::Checkbox::new(&mut checked, "mid-side"));
+
+                        update_param!(setter, &params.mid_side, checked);
+
+                        let mut stereo_mix = params.stereo_mix.value();
+                        ui.label("Stereo Mix ");
+                        ui.add(
+                            egui::widgets::DragValue::new(&mut stereo_mix)
+                                .range(0.0..=1.0)
+                                .speed(0.01)
+                                .custom_formatter(|val, _| format!("{:.0}%", val * 100.0)),
+                        );
+                        update_param!(setter, &params.stereo_mix, stereo_mix);
+                    })
                 });
+            // });
         },
     )
 }
