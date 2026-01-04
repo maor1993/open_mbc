@@ -133,7 +133,7 @@ jobs:
             xcrun stapler staple "$plugin"
             rm "$zip_name"
           done
-
+ 
       - name: Determine build archive name
         run: |
           # If this is a tag, use the tag name. Otherwise, use a timestamp.
