@@ -84,7 +84,7 @@ jobs:
             cargo xtask bundle "${package_args[@]}" --release
           fi
 
-      # --- NEW: SIGN AND NOTARIZE MACOS BINARIES ---
+      #  SIGN AND NOTARIZE MACOS BINARIES 
       - name: Sign and Notarize macOS Plugins
         if: matrix.os == 'macos-latest'
         env:
@@ -92,22 +92,44 @@ jobs:
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+         # 1. Check if certificates were imported correctly
+          echo "Checking available identities..."
+          security find-identity -v -p codesigning
+          
+          # 2. Extract the Identity Name
+          # We search specifically for the 'Developer ID Application' certificate
           CERT_ID=$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | awk -F '"' '{print $2}')
           
+          if [ -z "$CERT_ID" ]; then
+            echo "ERROR: No valid 'Developer ID Application' certificate found in keychain."
+            exit 1
+          fi
+          echo "Using Certificate ID: $CERT_ID"
+
+          # 3. Verify the build exists
+          if [ ! -d "target/bundled" ] || [ -z "$(ls -A target/bundled/*.vst3 2>/dev/null)" ]; then
+            echo "ERROR: No .vst3 files found in target/bundled/"
+            exit 1
+          fi
+
+          # 4. Sign and Notarize
           for plugin in target/bundled/*.vst3; do
             echo "Signing $plugin..."
             codesign --force --options runtime --timestamp --sign "$CERT_ID" --deep "$plugin"
-            echo "Notarizing $plugin..."
+            
+            echo "Creating temp zip for $plugin..."
             zip_name="notarization_tmp.zip"
             ditto -c -k --keepParent "$plugin" "$zip_name"
             
+            echo "Submitting to Apple Notary Service..."
+            # Using --wait ensures the script stays alive until Apple finishes
             xcrun notarytool submit "$zip_name" \
               --apple-id "$APPLE_ID" \
               --password "$APPLE_ID_PASSWORD" \
               --team-id "$APPLE_TEAM_ID" \
               --wait
             
-            echo "Stapling notarization to $plugin..."
+            echo "Stapling $plugin..."
             xcrun stapler staple "$plugin"
             rm "$zip_name"
           done
