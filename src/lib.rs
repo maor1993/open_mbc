@@ -124,7 +124,7 @@ impl Default for CompParams {
         Self {
             enable: BoolParam::new("Enable", false),
             center_freq: FloatParam::new(
-                "Center",
+                "Freq",
                 1000.0,
                 FloatRange::Linear {
                     min: FREQ_RANGE_MIN,

@@ -24,11 +24,11 @@ impl Crossover {
     pub fn configure(&mut self) {
         match self.mode {
             FilterType::Bandpass => {
-                self.filters[0].bandpass(
+                self.filters[0].bandpass_q(
                     (self.center_freq / self.sample_rate) as f64,
                     self.octaves as f64,
                 );
-                self.filters[1].bandpass(
+                self.filters[1].bandpass_q(
                     (self.center_freq / self.sample_rate) as f64,
                     self.octaves as f64,
                 );
