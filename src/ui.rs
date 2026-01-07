@@ -195,8 +195,6 @@ fn create_state_tooltip(
         update_param!(setter, &params.comps[idx].enable, enable);
     }
 
-    // ui.label(format!("Octaves {}", idx));
-
     ui.vertical_centered_justified(|ui| {
         ui.horizontal(|ui| {
             ui.add(
@@ -211,7 +209,7 @@ fn create_state_tooltip(
             let mut octaves = params.comps[idx].q.value();
             ui.add(
                 Knob::new(&mut octaves, 0.01, 10.0, egui_knob::KnobStyle::Wiper)
-                    .with_label("Octaves", egui_knob::LabelPosition::Bottom),
+                    .with_label("Q", egui_knob::LabelPosition::Bottom),
             );
             update_param!(setter, &params.comps[idx].q, octaves);
 
@@ -223,7 +221,7 @@ fn create_state_tooltip(
                     FREQ_RANGE_MAX,
                     egui_knob::KnobStyle::Wiper,
                 )
-                .with_label("Center", egui_knob::LabelPosition::Bottom)
+                .with_label("Freq", egui_knob::LabelPosition::Bottom)
                 .with_step(Some(10.0)),
             );
             update_param!(setter, &params.comps[idx].center_freq, freq);
@@ -591,19 +589,23 @@ pub fn build_editor(
                                             .color(COLOR_BASELINE[i])
                                             .filled(true),
                                     );
+                                    {
+                                        let q = params.comps[i].q.value();
+                                        let freq = params.comps[i].center_freq.value();
+                                        let f0_2q = freq / (q * 2.0);
+                                        let f0_sqrt_q = freq * (1.0 + 1.0 / (4.0 * q * q)).sqrt();
 
-                                    let filt_min = (params.comps[i].center_freq.value()
-                                        / 2.0_f32.powf(params.comps[i].q.value() / 2.0))
-                                        as f64;
-                                    let filt_max =
-                                        filt_min * 2.0_f32.powf(params.comps[i].q.value()) as f64;
-                                    let span = egui_plot::Span::new(
-                                        format!("filter {}", i),
-                                        filt_min.log10()..=filt_max.log10(),
-                                    )
-                                    .fill(COLOR_BASELINE[i].gamma_multiply_u8(10));
+                                        let filt_min = (f0_sqrt_q - f0_2q) as f64;
+                                        let filt_max = (f0_sqrt_q + f0_2q) as f64;
 
-                                    plot_ui.span(span);
+                                        let span = egui_plot::Span::new(
+                                            format!("filter {}", i),
+                                            filt_min.log10()..=filt_max.log10(),
+                                        )
+                                        .fill(COLOR_BASELINE[i].gamma_multiply_u8(10));
+
+                                        plot_ui.span(span);
+                                    }
                                 }
                             }
 
