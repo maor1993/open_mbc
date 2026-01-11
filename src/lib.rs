@@ -565,7 +565,7 @@ impl Plugin for OpenMbc {
                     if self.params.comps[i].enable.value() {
                         let comp_filt = &mut self.comp_filt_state[i];
 
-                        let stereo_mix = self.params.stereo_mix.value();
+                        let stereo_mix = self.params.stereo_mix.value() / 2.0;
                         //TODO: missing condtion on if we're using an actual side chain!
                         let sc_input = if self.params.comps[i].sidechain.value() {
                             aux_left_right
