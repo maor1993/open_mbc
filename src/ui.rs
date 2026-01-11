@@ -342,8 +342,8 @@ pub fn build_editor(
                         let sig1 = gain_to_db_fast(
                             peak_meter_val[1].load(std::sync::atomic::Ordering::Relaxed),
                         );
-                        ui.add(VolumeMeter::new(&sig0, MIN_POWER_DB as f32, 6.0).width(15.0));
-                        ui.add(VolumeMeter::new(&sig1, MIN_POWER_DB as f32, 6.0).width(15.0));
+                        ui.add(VolumeMeter::new(&sig0, nih_plug::util::MINUS_INFINITY_DB, 6.0).width(15.0));
+                        ui.add(VolumeMeter::new(&sig1,  nih_plug::util::MINUS_INFINITY_DB, 6.0).width(15.0));
 
                         let plot = Plot::new("eq_plot")
                             .height(ui.available_height())
