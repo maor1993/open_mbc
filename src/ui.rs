@@ -1,4 +1,4 @@
-use egui_plot::Plot;
+use egui_plot::{AxisHints, HPlacement, Plot};
 use std::{
     f32, f64,
     sync::{Arc, Mutex},
@@ -180,20 +180,20 @@ fn create_state_tooltip(
 ) {
     let last_idx = ui_data.lock().unwrap().curr_mbc_idx;
 
-    let mut idx = last_idx;
-    ui.add(egui::widgets::Slider::new(&mut idx, 0..=MAX_MBCS - 1));
+    let idx = last_idx;
 
-    if idx != last_idx {
-        ui_data.lock().unwrap().curr_mbc_idx = idx;
-    }
     //TODO: currently we're locking and unlocking many times, might need to be more efficient here.
     let curr_gain_reduction = ui_data.lock().unwrap().gain_reduction.clone();
 
-    {
+    ui.horizontal(|ui| {
         let mut enable = params.comps[idx].enable.value();
         ui.checkbox(&mut enable, format!("Enable {}", idx));
         update_param!(setter, &params.comps[idx].enable, enable);
-    }
+
+        let mut sidechain = params.comps[idx].sidechain.value();
+        ui.add(egui::widgets::Checkbox::new(&mut sidechain, "sidechain"));
+        update_param!(setter, &params.comps[idx].sidechain, sidechain);
+    });
 
     ui.vertical_centered_justified(|ui| {
         ui.horizontal(|ui| {
@@ -275,12 +275,6 @@ fn create_state_tooltip(
                     .with_label_format(|x| format!("{:.0}", x)), // .with_step(Some(1.0)),
             );
             update_param!(setter, &params.comps[idx].release, release);
-
-            let mut sidechain = params.comps[idx].sidechain.value();
-
-            ui.add(egui::widgets::Checkbox::new(&mut sidechain, "sidechain"));
-
-            update_param!(setter, &params.comps[idx].sidechain, sidechain);
         })
     });
 }
@@ -342,8 +336,14 @@ pub fn build_editor(
                         let sig1 = gain_to_db_fast(
                             peak_meter_val[1].load(std::sync::atomic::Ordering::Relaxed),
                         );
-                        ui.add(VolumeMeter::new(&sig0, nih_plug::util::MINUS_INFINITY_DB, 6.0).width(15.0));
-                        ui.add(VolumeMeter::new(&sig1,  nih_plug::util::MINUS_INFINITY_DB, 6.0).width(15.0));
+                        ui.add(
+                            VolumeMeter::new(&sig0, nih_plug::util::MINUS_INFINITY_DB, 6.0)
+                                .width(15.0),
+                        );
+                        ui.add(
+                            VolumeMeter::new(&sig1, nih_plug::util::MINUS_INFINITY_DB, 6.0)
+                                .width(15.0),
+                        );
 
                         let plot = Plot::new("eq_plot")
                             .height(ui.available_height())
@@ -362,10 +362,13 @@ pub fn build_editor(
                                     let base = 10.0f64.powi(pow);
 
                                     // Major tick (the power of 10)
+                                    //we're skipping the 10Hz
+                                    if base != 10.0 {
                                     marks.push(egui_plot::GridMark {
                                         value: pow as f64,
                                         step_size: 1.0, // Used by egui to determine line thickness
                                     });
+                                    }
 
                                     // Only draw if we aren't zoomed out too far to keep the UI clean
                                     for i in 2..10 {
@@ -707,12 +710,11 @@ pub fn build_editor(
                         .align(egui::RectAlign::BOTTOM)
                         .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
                         .open(params.comps[selected_index].enable.value())
-                        .frame(
-                            egui::Frame::new().corner_radius(10).fill(
-                                egui::Color32::BLACK
-                                    .blend(COLOR_BASELINE[selected_index].gamma_multiply_u8(60)),
-                            ),
-                        )
+                        .style(egui::style::StyleModifier::new(move |style| {
+                            style.visuals.window_fill = egui::Color32::BLACK
+                                .additive()
+                                .blend(COLOR_BASELINE[selected_index].gamma_multiply_u8(20));
+                        }))
                         .show(|ui| {
                             create_state_tooltip(ui, &params, &ui_data, setter);
                         });
