@@ -1,4 +1,15 @@
 use cute_dsp::filters::{Biquad, FilterType};
+use nih_plug::prelude::Enum;
+use num_complex::Complex64;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Enum)]
+pub enum FilterSlope {
+    #[default]
+    Slope12dB = 1,
+    Slope24dB = 2,
+    Slope36dB = 3,
+    Slope48dB = 4,
+}
 
 pub struct Crossover {
     pub sample_rate: f32,
@@ -6,7 +17,7 @@ pub struct Crossover {
     pub octaves: f32,
     pub _spacing: f32,
     pub mode: FilterType,
-    filters: [Biquad<f64>; 2],
+    filters: [[Biquad<f64>; 2]; 5],
 }
 
 impl Crossover {
@@ -17,64 +28,95 @@ impl Crossover {
             octaves: 0.0,
             _spacing: 500.0,
             mode,
-            filters: std::array::from_fn(|_| Biquad::new(true)),
+            filters: std::array::from_fn(|_| std::array::from_fn(|_| Biquad::new(true))),
         }
     }
 
     pub fn configure(&mut self) {
-        match self.mode {
-            FilterType::Bandpass => {
-                self.filters[0].bandpass_q(
-                    (self.center_freq / self.sample_rate) as f64,
-                    self.octaves as f64,
-                );
-                self.filters[1].bandpass_q(
-                    (self.center_freq / self.sample_rate) as f64,
-                    self.octaves as f64,
-                );
-            },
-            FilterType::Lowpass => {
-                self.filters[0].lowpass(
-                    (self.center_freq / self.sample_rate) as f64,
-                    self.octaves as f64,
-                    cute_dsp::filters::BiquadDesign::Bilinear
-                );
-                self.filters[1].lowpass(
-                    (self.center_freq / self.sample_rate) as f64,
-                    self.octaves as f64,
-                    cute_dsp::filters::BiquadDesign::Bilinear
-                );
-            },
-            FilterType::Highpass => {
-                self.filters[0].highpass(
-                    (self.center_freq / self.sample_rate) as f64,
-                    self.octaves as f64,
-                    cute_dsp::filters::BiquadDesign::Bilinear
-                );
-                self.filters[1].highpass(
-                    (self.center_freq / self.sample_rate) as f64,
-                    self.octaves as f64,
-                    cute_dsp::filters::BiquadDesign::Bilinear
-                );
+        for filts in self.filters.iter_mut() {
+            match self.mode {
+                FilterType::Bandpass => {
+                    filts[0].bandpass_q(
+                        (self.center_freq / self.sample_rate) as f64,
+                        self.octaves as f64,
+                    );
+                    filts[1].bandpass_q(
+                        (self.center_freq / self.sample_rate) as f64,
+                        self.octaves as f64,
+                    );
+                }
+                FilterType::Lowpass => {
+                    filts[0].lowpass(
+                        (self.center_freq / self.sample_rate) as f64,
+                        self.octaves as f64,
+                        cute_dsp::filters::BiquadDesign::Bilinear,
+                    );
+                    filts[1].lowpass(
+                        (self.center_freq / self.sample_rate) as f64,
+                        self.octaves as f64,
+                        cute_dsp::filters::BiquadDesign::Bilinear,
+                    );
+                }
+                FilterType::Highpass => {
+                    filts[0].highpass(
+                        (self.center_freq / self.sample_rate) as f64,
+                        self.octaves as f64,
+                        cute_dsp::filters::BiquadDesign::Bilinear,
+                    );
+                    filts[1].highpass(
+                        (self.center_freq / self.sample_rate) as f64,
+                        self.octaves as f64,
+                        cute_dsp::filters::BiquadDesign::Bilinear,
+                    );
+                }
+                _ => todo!(),
             }
-            _ => todo!(),
-        };
-    }
-
-    pub fn process(&mut self, sample: f32,sc:Option<f32>) -> (f32, Option<f32>) {
-        let main = self.filters[0].process(sample as f64) as f32;
-    
-        match sc {
-            Some(smp) => (main,Some(self.filters[1].process(smp as f64) as f32)),
-            None => (main,None)
         }
-        
     }
 
-    pub fn get_main_filter(&self) -> &Biquad<f64> {
-        &self.filters[0]
+    pub fn process(
+        &mut self,
+        sample: f32,
+        sc: Option<f32>,
+        stages: FilterSlope,
+    ) -> (f32, Option<f32>) {
+        let init_values = match sc {
+            Some(smp) => (sample, smp),
+            None => (sample, sample),
+        };
+
+        let results =
+            self.filters
+                .iter_mut()
+                .take(stages as usize)
+                .fold(init_values, |prev, filt| {
+                    (
+                        filt[0].process(prev.0 as f64) as f32,
+                        filt[1].process(prev.1 as f64) as f32,
+                    )
+                });
+
+        if sc.is_some() {
+            (results.0, Some(results.1))
+        } else {
+            (results.0, None)
+        }
     }
-    pub fn _get_aux_filter(&self) -> &Biquad<f64> {
-        &self.filters[1]
+
+    /*     pub fn get_main_filter(&self,) -> &Biquad<f64> {
+        &self.filters[0]
+    } */
+
+    pub fn get_main_filter_response(
+        &self,
+        normalized_freq: f64,
+        stages: &FilterSlope,
+    ) -> Complex64 {
+        self.filters
+            .iter()
+            .take(*stages as usize)
+            .fold(Complex64::ONE, |prev, filt| {
+                prev * filt[0].get_complex_response(normalized_freq)
+            })
     }
 }

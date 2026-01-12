@@ -23,8 +23,8 @@ use nih_plug_egui::{
 
 use nih_plug::util::MINUS_INFINITY_DB;
 
-use crate::OpenMbcParams;
 use crate::MAX_MBCS;
+use crate::{crossover, OpenMbcParams};
 
 use crate::{FREQ_RANGE_MAX, FREQ_RANGE_MIN};
 pub const NUM_OF_FILTER_POINTS: usize = 1024; //used for visualization, might need to interpolate
@@ -193,6 +193,18 @@ fn create_state_tooltip(
         let mut sidechain = params.comps[idx].sidechain.value();
         ui.add(egui::widgets::Checkbox::new(&mut sidechain, "sidechain"));
         update_param!(setter, &params.comps[idx].sidechain, sidechain);
+
+        let mut slope = params.comps[idx].slope.value();
+
+        egui::containers::ComboBox::from_label("slope")
+            .selected_text(format!("{:?}", slope))
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut slope, crossover::FilterSlope::Slope12dB, "12dB");
+                ui.selectable_value(&mut slope, crossover::FilterSlope::Slope24dB, "24dB");
+                ui.selectable_value(&mut slope, crossover::FilterSlope::Slope36dB, "36dB");
+                ui.selectable_value(&mut slope, crossover::FilterSlope::Slope48dB, "48dB");
+            });
+        update_param!(setter, &params.comps[idx].slope, slope);
     });
 
     ui.vertical_centered_justified(|ui| {

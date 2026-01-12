@@ -64,6 +64,9 @@ struct CompParams {
     #[id = "q"] //TODO: rename to octaves or convert to Q...
     pub q: FloatParam,
 
+    #[id = "slope"]
+    pub slope: EnumParam<crossover::FilterSlope>,
+
     #[id = "threshold"]
     pub threshold: FloatParam,
 
@@ -150,6 +153,10 @@ impl Default for CompParams {
                 },
             )
             .with_smoother(SmoothingStyle::Linear(DEFAULT_SMOOTHING_MSEC)),
+            slope: EnumParam::<crossover::FilterSlope>::new(
+                "Slope",
+                crossover::FilterSlope::Slope12dB,
+            ),
             threshold: FloatParam::new(
                 "Threshold",
                 util::db_to_gain(0.0),
@@ -381,7 +388,8 @@ impl Plugin for OpenMbc {
                         if self.params.comps[idx].enable.value() {
                             let main_filter_mag = ui::utils::get_filter_shape(
                                 self.sample_rate,
-                                comp_filt[0].filt.get_main_filter(),
+                                &comp_filt[0].filt,
+                                self.params.comps[idx].slope.value(),
                                 1.0,
                             );
 
@@ -580,7 +588,11 @@ impl Plugin for OpenMbc {
                             ),
                         };
                         //filter
-                        let (filt_main, sc) = comp_filt[ch].filt.process(*sample, sc);
+                        let (filt_main, sc) = comp_filt[ch].filt.process(
+                            *sample,
+                            sc,
+                            self.params.comps[i].slope.value(),
+                        );
 
                         //compress
 
@@ -625,8 +637,8 @@ impl Plugin for OpenMbc {
         }
         if self.spectrum_handle.samples_in_buf < NUM_OF_VIZ_FFT_POINTS {
             if self.params.editor_state.is_open() {
-                if self.spectrum_handle.samples_in_buf+samples_to_copy > NUM_OF_VIZ_FFT_POINTS{
-                    samples_to_copy = NUM_OF_VIZ_FFT_POINTS-self.spectrum_handle.samples_in_buf;
+                if self.spectrum_handle.samples_in_buf + samples_to_copy > NUM_OF_VIZ_FFT_POINTS {
+                    samples_to_copy = NUM_OF_VIZ_FFT_POINTS - self.spectrum_handle.samples_in_buf;
                 }
                 self.spectrum_handle.pre_comp_stft_handle.write_input(
                     0,
