@@ -1,4 +1,4 @@
-use cute_dsp::filters::{Biquad, FilterType};
+use cute_dsp::filters::Biquad;
 use nih_plug::prelude::Enum;
 use num_complex::Complex64;
 
@@ -11,23 +11,31 @@ pub enum FilterSlope {
     Slope48dB = 4,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Enum)]
+pub enum FilterTypeCx {
+    #[default]
+    Bandpass = 0,
+    Lowpass = 1,
+    Highpass = 2,
+}
+
 pub struct Crossover {
     pub sample_rate: f32,
     pub center_freq: f32,
     pub octaves: f32,
     pub _spacing: f32,
-    pub mode: FilterType,
+    pub mode: FilterTypeCx,
     filters: [[Biquad<f64>; 2]; 5],
 }
 
 impl Crossover {
-    pub fn new(sample_rate: f32, mode: FilterType) -> Self {
+    pub fn new(sample_rate: f32) -> Self {
         Self {
             sample_rate,
             center_freq: 0.0,
             octaves: 0.0,
             _spacing: 500.0,
-            mode,
+            mode: FilterTypeCx::Bandpass,
             filters: std::array::from_fn(|_| std::array::from_fn(|_| Biquad::new(true))),
         }
     }
@@ -35,7 +43,7 @@ impl Crossover {
     pub fn configure(&mut self) {
         for filts in self.filters.iter_mut() {
             match self.mode {
-                FilterType::Bandpass => {
+                FilterTypeCx::Bandpass => {
                     filts[0].bandpass_q(
                         (self.center_freq / self.sample_rate) as f64,
                         self.octaves as f64,
@@ -45,7 +53,7 @@ impl Crossover {
                         self.octaves as f64,
                     );
                 }
-                FilterType::Lowpass => {
+                FilterTypeCx::Lowpass => {
                     filts[0].lowpass(
                         (self.center_freq / self.sample_rate) as f64,
                         self.octaves as f64,
@@ -57,7 +65,7 @@ impl Crossover {
                         cute_dsp::filters::BiquadDesign::Bilinear,
                     );
                 }
-                FilterType::Highpass => {
+                FilterTypeCx::Highpass => {
                     filts[0].highpass(
                         (self.center_freq / self.sample_rate) as f64,
                         self.octaves as f64,

@@ -205,12 +205,28 @@ fn create_state_tooltip(
                 ui.selectable_value(&mut slope, crossover::FilterSlope::Slope48dB, "48dB");
             });
         update_param!(setter, &params.comps[idx].slope, slope);
+
+    
+
+        let mut filtshape = params.comps[idx].filtertype.value();
+        
+        let lpf_icon = egui::Image::new(egui::include_image!("../assets/filter-lowpass-svgrepo-com.svg")).bg_fill(Color32::GRAY).tint(Color32::BLACK);
+        let bpf_icon = egui::Image::new(egui::include_image!("../assets/filter-bandpass-svgrepo-com.svg")).bg_fill(Color32::GRAY).tint(Color32::BLACK);
+        let hpf_icon = egui::Image::new(egui::include_image!("../assets/filter-highpass-svgrepo-com.svg")).bg_fill(Color32::GRAY).tint(Color32::BLACK);
+        ui.horizontal(|ui| {
+            // Note that these are reversed as we look for the cutoff, not the resulting value
+            ui.selectable_value(&mut filtshape, crossover::FilterTypeCx::Lowpass, hpf_icon);
+            ui.selectable_value(&mut filtshape, crossover::FilterTypeCx::Bandpass, bpf_icon);
+            ui.selectable_value(&mut filtshape, crossover::FilterTypeCx::Highpass, lpf_icon);
+        });
+        update_param!(setter,&params.comps[idx].filtertype,filtshape);
+
     });
 
     ui.vertical_centered_justified(|ui| {
         ui.horizontal(|ui| {
             ui.add(
-                ProgressBar::new((60.0 - curr_gain_reduction[idx]) / 60.0)
+                ProgressBar::new((60.0 - curr_gain_reduction[idx]).max(0.0) / 60.0)
                     .show_percentage()
                     .text(format!("reduction: {:.1}dB", curr_gain_reduction[idx]))
                     .desired_width(300.0),
@@ -220,7 +236,7 @@ fn create_state_tooltip(
         ui.horizontal(|ui| {
             let mut octaves = params.comps[idx].q.value();
             ui.add(
-                Knob::new(&mut octaves, 0.01, 10.0, egui_knob::KnobStyle::Wiper)
+                Knob::new(&mut octaves, 0.01, 10.0, egui_knob::KnobStyle::Wiper).with_double_click_reset(1.0)
                     .with_label("Q", egui_knob::LabelPosition::Bottom),
             );
             update_param!(setter, &params.comps[idx].q, octaves);
@@ -240,7 +256,7 @@ fn create_state_tooltip(
 
             let mut gain = gain_to_db_fast(params.comps[idx].gain.value());
             ui.add(
-                Knob::new(&mut gain, -30.0, 30.0, egui_knob::KnobStyle::Wiper)
+                Knob::new(&mut gain, -30.0, 30.0, egui_knob::KnobStyle::Wiper).with_double_click_reset(0.0)
                     .with_label("Gain[dB]", egui_knob::LabelPosition::Bottom),
             );
             update_param!(setter, &params.comps[idx].gain, db_to_gain_fast(gain));
@@ -303,6 +319,7 @@ pub fn build_editor(
         Default::default(),
         |_, _, _| {},
         move |egui_ctx, setter, _queue, _state| {
+            egui_extras::install_image_loaders(egui_ctx);
             ResizableWindow::new("res-wind")
                 .min_size(Vec2::new(640.0, 480.0))
                 .show(egui_ctx, egui_state.as_ref(), |ui| {

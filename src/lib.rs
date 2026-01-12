@@ -67,6 +67,9 @@ struct CompParams {
     #[id = "slope"]
     pub slope: EnumParam<crossover::FilterSlope>,
 
+    #[id = "filtertype"]
+    pub filtertype: EnumParam<crossover::FilterTypeCx>,
+
     #[id = "threshold"]
     pub threshold: FloatParam,
 
@@ -157,6 +160,10 @@ impl Default for CompParams {
                 "Slope",
                 crossover::FilterSlope::Slope12dB,
             ),
+            filtertype: EnumParam::<crossover::FilterTypeCx>::new(
+                "Filtertype",
+                crossover::FilterTypeCx::Bandpass,
+            ),
             threshold: FloatParam::new(
                 "Threshold",
                 util::db_to_gain(0.0),
@@ -228,7 +235,7 @@ impl Default for CompFilter {
     fn default() -> Self {
         Self {
             comp: Compressor::new(0.0),
-            filt: Crossover::new(0.0, FilterType::Bandpass),
+            filt: Crossover::new(0.0),
         }
     }
 }
@@ -510,20 +517,16 @@ impl Plugin for OpenMbc {
                 for (idx, comp_filt) in self.comp_filt_state.iter_mut().enumerate() {
                     let this_comp_params = &self.params.comps[idx];
                     // handle bpf update
-                    if (this_comp_params.center_freq.smoothed.is_smoothing())
-                        || (this_comp_params.q.smoothed.is_smoothing()
-                            || (this_comp_params.gain.smoothed.is_smoothing()))
+                    if this_comp_params.center_freq.smoothed.is_smoothing()
+                        || this_comp_params.q.smoothed.is_smoothing()
+                        || this_comp_params.gain.smoothed.is_smoothing()
+                        || (this_comp_params.filtertype.value() != comp_filt[ch].filt.mode)
                     {
                         comp_filt[ch].filt.center_freq =
                             this_comp_params.center_freq.smoothed.next();
                         comp_filt[ch].filt.octaves = this_comp_params.q.smoothed.next();
 
-                        //TODO: let user choose this..
-                        comp_filt[ch].filt.mode = match comp_filt[ch].filt.center_freq {
-                            0.0..100.0 => FilterType::Lowpass,
-                            100.0..10000.0 => FilterType::Bandpass,
-                            _ => FilterType::Highpass,
-                        };
+                        comp_filt[ch].filt.mode = this_comp_params.filtertype.value();
 
                         comp_filt[ch].filt.configure();
                     }

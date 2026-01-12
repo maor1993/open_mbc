@@ -29,8 +29,9 @@ anyhow = "1.0.100"
 
 egui_plot = {git="https://github.com/emilk/egui_plot.git"}
 num-complex = "0.4.6"
-egui_knob = "0.3.6"
+egui_knob = "0.3.8"
 splines = "5.0.0"
+egui_extras = { version = "0.33.3", features = ["svg"] }
 
 [dev-dependencies]
 plotters = {version = "0.3.7"}
