@@ -215,9 +215,9 @@ fn create_state_tooltip(
         let hpf_icon = egui::Image::new(egui::include_image!("../assets/filter-highpass-svgrepo-com.svg")).bg_fill(Color32::GRAY).tint(Color32::BLACK);
         ui.horizontal(|ui| {
             // Note that these are reversed as we look for the cutoff, not the resulting value
-            ui.selectable_value(&mut filtshape, crossover::FilterTypeCx::Lowpass, hpf_icon);
+            ui.selectable_value(&mut filtshape, crossover::FilterTypeCx::Highpass, hpf_icon);
             ui.selectable_value(&mut filtshape, crossover::FilterTypeCx::Bandpass, bpf_icon);
-            ui.selectable_value(&mut filtshape, crossover::FilterTypeCx::Highpass, lpf_icon);
+            ui.selectable_value(&mut filtshape, crossover::FilterTypeCx::Lowpass, lpf_icon);
         });
         update_param!(setter,&params.comps[idx].filtertype,filtshape);
 

@@ -54,27 +54,23 @@ impl Crossover {
                     );
                 }
                 FilterTypeCx::Lowpass => {
-                    filts[0].lowpass(
+                    filts[0].low_shelf_q(
                         (self.center_freq / self.sample_rate) as f64,
                         self.octaves as f64,
-                        cute_dsp::filters::BiquadDesign::Bilinear,
                     );
-                    filts[1].lowpass(
+                    filts[1].low_shelf_q(
                         (self.center_freq / self.sample_rate) as f64,
                         self.octaves as f64,
-                        cute_dsp::filters::BiquadDesign::Bilinear,
                     );
                 }
                 FilterTypeCx::Highpass => {
-                    filts[0].highpass(
+                    filts[0].high_shelf_q(
                         (self.center_freq / self.sample_rate) as f64,
                         self.octaves as f64,
-                        cute_dsp::filters::BiquadDesign::Bilinear,
                     );
-                    filts[1].highpass(
+                    filts[1].high_shelf_q(
                         (self.center_freq / self.sample_rate) as f64,
                         self.octaves as f64,
-                        cute_dsp::filters::BiquadDesign::Bilinear,
                     );
                 }
                 _ => todo!(),
