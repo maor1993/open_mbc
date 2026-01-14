@@ -206,21 +206,30 @@ fn create_state_tooltip(
             });
         update_param!(setter, &params.comps[idx].slope, slope);
 
-    
-
         let mut filtshape = params.comps[idx].filtertype.value();
         
-        let lpf_icon = egui::Image::new(egui::include_image!("../assets/filter-lowpass-svgrepo-com.svg")).bg_fill(Color32::GRAY).tint(Color32::BLACK);
-        let bpf_icon = egui::Image::new(egui::include_image!("../assets/filter-bandpass-svgrepo-com.svg")).bg_fill(Color32::GRAY).tint(Color32::BLACK);
-        let hpf_icon = egui::Image::new(egui::include_image!("../assets/filter-highpass-svgrepo-com.svg")).bg_fill(Color32::GRAY).tint(Color32::BLACK);
+        let lpf_icon = egui::Image::new(egui::include_image!(
+            "../assets/filter-lowpass-svgrepo-com.svg"
+        ))
+        .bg_fill(Color32::GRAY)
+        .tint(Color32::BLACK);
+        let bpf_icon = egui::Image::new(egui::include_image!(
+            "../assets/filter-bandpass-svgrepo-com.svg"
+        ))
+        .bg_fill(Color32::GRAY)
+        .tint(Color32::BLACK);
+        let hpf_icon = egui::Image::new(egui::include_image!(
+            "../assets/filter-highpass-svgrepo-com.svg"
+        ))
+        .bg_fill(Color32::GRAY)
+        .tint(Color32::BLACK);
         ui.horizontal(|ui| {
             // Note that these are reversed as we look for the cutoff, not the resulting value
             ui.selectable_value(&mut filtshape, crossover::FilterTypeCx::Highpass, hpf_icon);
             ui.selectable_value(&mut filtshape, crossover::FilterTypeCx::Bandpass, bpf_icon);
             ui.selectable_value(&mut filtshape, crossover::FilterTypeCx::Lowpass, lpf_icon);
         });
-        update_param!(setter,&params.comps[idx].filtertype,filtshape);
-
+        update_param!(setter, &params.comps[idx].filtertype, filtshape);
     });
 
     ui.vertical_centered_justified(|ui| {
@@ -236,7 +245,9 @@ fn create_state_tooltip(
         ui.horizontal(|ui| {
             let mut octaves = params.comps[idx].q.value();
             ui.add(
-                Knob::new(&mut octaves, 0.01, 10.0, egui_knob::KnobStyle::Wiper).with_double_click_reset(1.0)
+                Knob::new(&mut octaves, 0.01, 10.0, egui_knob::KnobStyle::Wiper)
+                    .with_double_click_reset(1.0)
+                    .with_middle_scroll()
                     .with_label("Q", egui_knob::LabelPosition::Bottom),
             );
             update_param!(setter, &params.comps[idx].q, octaves);
@@ -250,13 +261,16 @@ fn create_state_tooltip(
                     egui_knob::KnobStyle::Wiper,
                 )
                 .with_label("Freq", egui_knob::LabelPosition::Bottom)
+                .with_middle_scroll()
                 .with_step(Some(10.0)),
             );
             update_param!(setter, &params.comps[idx].center_freq, freq);
 
             let mut gain = gain_to_db_fast(params.comps[idx].gain.value());
             ui.add(
-                Knob::new(&mut gain, -30.0, 30.0, egui_knob::KnobStyle::Wiper).with_double_click_reset(0.0)
+                Knob::new(&mut gain, -30.0, 30.0, egui_knob::KnobStyle::Wiper)
+                    .with_double_click_reset(0.0)
+                    .with_middle_scroll()
                     .with_label("Gain[dB]", egui_knob::LabelPosition::Bottom),
             );
             update_param!(setter, &params.comps[idx].gain, db_to_gain_fast(gain));
@@ -266,6 +280,7 @@ fn create_state_tooltip(
             let mut threshold = gain_to_db_fast(params.comps[idx].threshold.value());
             ui.add(
                 Knob::new(&mut threshold, -60.0, 0.0, egui_knob::KnobStyle::Wiper)
+                    .with_middle_scroll()
                     .with_label("Threshold", egui_knob::LabelPosition::Bottom),
             );
             update_param!(
@@ -276,6 +291,7 @@ fn create_state_tooltip(
             let mut range = gain_to_db_fast(params.comps[idx].range.value());
             ui.add(
                 Knob::new(&mut range, -30.0, 0.0, egui_knob::KnobStyle::Wiper)
+                    .with_middle_scroll()
                     .with_label("Range", egui_knob::LabelPosition::Bottom),
             );
             update_param!(setter, &params.comps[idx].range, db_to_gain_fast(range));
@@ -283,6 +299,7 @@ fn create_state_tooltip(
             let mut ratio = params.comps[idx].ratio.value();
             ui.add(
                 Knob::new(&mut ratio, 1.0, 10.0, egui_knob::KnobStyle::Wiper)
+                    .with_middle_scroll()
                     .with_label("Ratio", egui_knob::LabelPosition::Bottom),
             );
             update_param!(setter, &params.comps[idx].ratio, ratio);
@@ -290,6 +307,7 @@ fn create_state_tooltip(
             let mut attack = params.comps[idx].attack.value();
             ui.add(
                 Knob::new(&mut attack, 1.0, 1000.0, egui_knob::KnobStyle::Wiper)
+                    .with_middle_scroll()
                     .with_label("Attack [mS]", egui_knob::LabelPosition::Bottom)
                     .with_label_format(|x| format!("{:.0}", x))
                     .with_step(Some(1.0)),
@@ -299,6 +317,7 @@ fn create_state_tooltip(
             let mut release = params.comps[idx].release.value();
             ui.add(
                 Knob::new(&mut release, 10.0, 10000.0, egui_knob::KnobStyle::Wiper)
+                    .with_middle_scroll()
                     .with_label("Release [mS]", egui_knob::LabelPosition::Bottom)
                     .with_label_format(|x| format!("{:.0}", x)), // .with_step(Some(1.0)),
             );
