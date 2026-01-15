@@ -42,6 +42,9 @@ struct OpenMbcParams {
     #[nested(array, group = "Comps")]
     pub comps: [CompParams; MAX_MBCS],
 
+    #[id = "solo"]
+    pub solo: IntParam,
+
     #[id = "stereo_mix"]
     pub stereo_mix: FloatParam,
 
@@ -262,6 +265,15 @@ impl Default for OpenMbcParams {
             editor_state: EguiState::from_size(1024, 640),
 
             comps: std::array::from_fn(|_| CompParams::default()),
+            solo: IntParam::new(
+                "solo_filter",
+                -1,
+                IntRange::Linear {
+                    min: -1,
+                    max: MAX_MBCS as i32,
+                },
+            )
+            .hide(),
             stereo_mix: FloatParam::new(
                 "stereo_mix",
                 1.0,
@@ -406,11 +418,18 @@ impl Plugin for OpenMbc {
 
                             // create solo shape
                             let gain = self.params.comps[idx].gain.value();
-                            for i in 0..NUM_OF_FILTER_POINTS {
-                                filt_plot[i] = (Complex64::ONE - main_filter_mag[i]
-                                    + main_filter_mag[i]
-                                        * (self.params.comps[idx].range.value() * gain) as f64)
-                                    .norm()
+
+                            if self.params.solo.value() == idx as i32 {
+                                for i in 0..NUM_OF_FILTER_POINTS {
+                                    filt_plot[i] = main_filter_mag[i].norm()
+                                }
+                            } else {
+                                for i in 0..NUM_OF_FILTER_POINTS {
+                                    filt_plot[i] = (Complex64::ONE - main_filter_mag[i]
+                                        + main_filter_mag[i]
+                                            * (self.params.comps[idx].range.value() * gain) as f64)
+                                        .norm()
+                                }
                             }
                         }
                     });
@@ -571,7 +590,7 @@ impl Plugin for OpenMbc {
                 }
                 let mut total_crossover = 0.0;
                 let mut total_filt_comp = 0.0;
-
+                let mut sc_from_solo = 0.0;
                 for i in 0..MAX_MBCS {
                     if self.params.comps[i].enable.value() {
                         let comp_filt = &mut self.comp_filt_state[i];
@@ -597,8 +616,11 @@ impl Plugin for OpenMbc {
                             self.params.comps[i].slope.value(),
                         );
 
-                        //compress
+                        if self.params.solo.value() == i as i32 {
+                            sc_from_solo = sc.unwrap_or(filt_main);
+                        }
 
+                        //compress
                         let comp = comp_filt[ch].comp.process(filt_main, sc);
 
                         let gain = self.params.comps[i].gain.smoothed.next();
@@ -608,7 +630,11 @@ impl Plugin for OpenMbc {
                     }
                 }
 
-                let total_output = total_filt_comp + *sample - total_crossover;
+                let total_output = if self.params.solo.value() == -1 {
+                    total_filt_comp + *sample - total_crossover
+                } else {
+                    sc_from_solo
+                };
 
                 *sample = total_output;
 

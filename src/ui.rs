@@ -207,7 +207,7 @@ fn create_state_tooltip(
         update_param!(setter, &params.comps[idx].slope, slope);
 
         let mut filtshape = params.comps[idx].filtertype.value();
-        
+
         let lpf_icon = egui::Image::new(egui::include_image!(
             "../assets/filter-lowpass-svgrepo-com.svg"
         ))
@@ -230,6 +230,21 @@ fn create_state_tooltip(
             ui.selectable_value(&mut filtshape, crossover::FilterTypeCx::Lowpass, lpf_icon);
         });
         update_param!(setter, &params.comps[idx].filtertype, filtshape);
+
+        let mut solo = params.solo.value();
+        let mut is_solo = solo == idx as i32;
+        let last_solo = is_solo;
+
+        ui.checkbox(&mut is_solo, "Solo");
+
+        // we tranistioned to solo from this checkbox
+        if is_solo & !last_solo {
+            solo = idx as i32;
+        } else if !is_solo & last_solo {
+            solo = -1;
+        }
+
+        update_param!(setter, &params.solo, solo);
     });
 
     ui.vertical_centered_justified(|ui| {
@@ -412,10 +427,10 @@ pub fn build_editor(
                                     // Major tick (the power of 10)
                                     //we're skipping the 10Hz
                                     if base != 10.0 {
-                                    marks.push(egui_plot::GridMark {
-                                        value: pow as f64,
-                                        step_size: 1.0, // Used by egui to determine line thickness
-                                    });
+                                        marks.push(egui_plot::GridMark {
+                                            value: pow as f64,
+                                            step_size: 1.0, // Used by egui to determine line thickness
+                                        });
                                     }
 
                                     // Only draw if we aren't zoomed out too far to keep the UI clean
@@ -455,6 +470,11 @@ pub fn build_editor(
                             {
                                 let uidata = ui_data.lock().unwrap();
 
+                                let shape_idx = if params.solo.value() == -1 {
+                                    3 * MAX_MBCS - 1
+                                } else {
+                                    params.solo.value() as usize
+                                };
                                 let main_line_shape_db: [f64; NUM_OF_FILTER_POINTS] =
                                     std::array::from_fn(|i| {
                                         nih_plug::util::gain_to_db_fast(
@@ -466,6 +486,10 @@ pub fn build_editor(
                                 {
                                     //FIXME: ffs write a normal function
                                     if filter_idx == 3 * MAX_MBCS - 1 {
+                                        continue;
+                                    }
+
+                                    if (filter_idx == 3 * MAX_MBCS) & (params.solo.value() != -1) {
                                         continue;
                                     }
 
@@ -508,7 +532,11 @@ pub fn build_editor(
                                             COLOR_BASELINE[filter_idx].gamma_multiply_u8(40),
                                         );
 
-                                        plot_ui.add(filledarea);
+                                        if params.solo.value() == filter_idx as i32 {
+                                            plot_ui.add(line);
+                                        } else {
+                                            plot_ui.add(filledarea);
+                                        }
                                     } else {
                                         plot_ui.line(line);
                                     }
