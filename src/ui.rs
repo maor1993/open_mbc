@@ -1,4 +1,4 @@
-use egui_plot::Plot;
+use egui_plot::{AxisHints, HPlacement, Plot};
 use std::{
     f32, f64,
     sync::{Arc, Mutex},
@@ -23,8 +23,8 @@ use nih_plug_egui::{
 
 use nih_plug::util::MINUS_INFINITY_DB;
 
-use crate::OpenMbcParams;
 use crate::MAX_MBCS;
+use crate::{crossover, OpenMbcParams};
 
 use crate::{FREQ_RANGE_MAX, FREQ_RANGE_MIN};
 pub const NUM_OF_FILTER_POINTS: usize = 1024; //used for visualization, might need to interpolate
@@ -180,25 +180,77 @@ fn create_state_tooltip(
 ) {
     let last_idx = ui_data.lock().unwrap().curr_mbc_idx;
 
-    let mut idx = last_idx;
-    ui.add(egui::widgets::Slider::new(&mut idx, 0..=MAX_MBCS - 1));
+    let idx = last_idx;
 
-    if idx != last_idx {
-        ui_data.lock().unwrap().curr_mbc_idx = idx;
-    }
     //TODO: currently we're locking and unlocking many times, might need to be more efficient here.
     let curr_gain_reduction = ui_data.lock().unwrap().gain_reduction.clone();
 
-    {
+    ui.horizontal(|ui| {
         let mut enable = params.comps[idx].enable.value();
         ui.checkbox(&mut enable, format!("Enable {}", idx));
         update_param!(setter, &params.comps[idx].enable, enable);
-    }
+
+        let mut sidechain = params.comps[idx].sidechain.value();
+        ui.add(egui::widgets::Checkbox::new(&mut sidechain, "sidechain"));
+        update_param!(setter, &params.comps[idx].sidechain, sidechain);
+
+        let mut slope = params.comps[idx].slope.value();
+
+        egui::containers::ComboBox::from_label("slope")
+            .selected_text(format!("{:?}", slope))
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut slope, crossover::FilterSlope::Slope12dB, "12dB");
+                ui.selectable_value(&mut slope, crossover::FilterSlope::Slope24dB, "24dB");
+                ui.selectable_value(&mut slope, crossover::FilterSlope::Slope36dB, "36dB");
+                ui.selectable_value(&mut slope, crossover::FilterSlope::Slope48dB, "48dB");
+            });
+        update_param!(setter, &params.comps[idx].slope, slope);
+
+        let mut filtshape = params.comps[idx].filtertype.value();
+
+        let lpf_icon = egui::Image::new(egui::include_image!(
+            "../assets/filter-lowpass-svgrepo-com.svg"
+        ))
+        .bg_fill(Color32::GRAY)
+        .tint(Color32::BLACK);
+        let bpf_icon = egui::Image::new(egui::include_image!(
+            "../assets/filter-bandpass-svgrepo-com.svg"
+        ))
+        .bg_fill(Color32::GRAY)
+        .tint(Color32::BLACK);
+        let hpf_icon = egui::Image::new(egui::include_image!(
+            "../assets/filter-highpass-svgrepo-com.svg"
+        ))
+        .bg_fill(Color32::GRAY)
+        .tint(Color32::BLACK);
+        ui.horizontal(|ui| {
+            // Note that these are reversed as we look for the cutoff, not the resulting value
+            ui.selectable_value(&mut filtshape, crossover::FilterTypeCx::Highpass, hpf_icon);
+            ui.selectable_value(&mut filtshape, crossover::FilterTypeCx::Bandpass, bpf_icon);
+            ui.selectable_value(&mut filtshape, crossover::FilterTypeCx::Lowpass, lpf_icon);
+        });
+        update_param!(setter, &params.comps[idx].filtertype, filtshape);
+
+        let mut solo = params.solo.value();
+        let mut is_solo = solo == idx as i32;
+        let last_solo = is_solo;
+
+        ui.checkbox(&mut is_solo, "Solo");
+
+        // we tranistioned to solo from this checkbox
+        if is_solo & !last_solo {
+            solo = idx as i32;
+        } else if !is_solo & last_solo {
+            solo = -1;
+        }
+
+        update_param!(setter, &params.solo, solo);
+    });
 
     ui.vertical_centered_justified(|ui| {
         ui.horizontal(|ui| {
             ui.add(
-                ProgressBar::new((60.0 - curr_gain_reduction[idx]) / 60.0)
+                ProgressBar::new((60.0 - curr_gain_reduction[idx]).max(0.0) / 60.0)
                     .show_percentage()
                     .text(format!("reduction: {:.1}dB", curr_gain_reduction[idx]))
                     .desired_width(300.0),
@@ -209,6 +261,8 @@ fn create_state_tooltip(
             let mut octaves = params.comps[idx].q.value();
             ui.add(
                 Knob::new(&mut octaves, 0.01, 10.0, egui_knob::KnobStyle::Wiper)
+                    .with_double_click_reset(1.0)
+                    .with_middle_scroll()
                     .with_label("Q", egui_knob::LabelPosition::Bottom),
             );
             update_param!(setter, &params.comps[idx].q, octaves);
@@ -222,6 +276,7 @@ fn create_state_tooltip(
                     egui_knob::KnobStyle::Wiper,
                 )
                 .with_label("Freq", egui_knob::LabelPosition::Bottom)
+                .with_middle_scroll()
                 .with_step(Some(10.0)),
             );
             update_param!(setter, &params.comps[idx].center_freq, freq);
@@ -229,6 +284,8 @@ fn create_state_tooltip(
             let mut gain = gain_to_db_fast(params.comps[idx].gain.value());
             ui.add(
                 Knob::new(&mut gain, -30.0, 30.0, egui_knob::KnobStyle::Wiper)
+                    .with_double_click_reset(0.0)
+                    .with_middle_scroll()
                     .with_label("Gain[dB]", egui_knob::LabelPosition::Bottom),
             );
             update_param!(setter, &params.comps[idx].gain, db_to_gain_fast(gain));
@@ -238,6 +295,7 @@ fn create_state_tooltip(
             let mut threshold = gain_to_db_fast(params.comps[idx].threshold.value());
             ui.add(
                 Knob::new(&mut threshold, -60.0, 0.0, egui_knob::KnobStyle::Wiper)
+                    .with_middle_scroll()
                     .with_label("Threshold", egui_knob::LabelPosition::Bottom),
             );
             update_param!(
@@ -248,6 +306,7 @@ fn create_state_tooltip(
             let mut range = gain_to_db_fast(params.comps[idx].range.value());
             ui.add(
                 Knob::new(&mut range, -30.0, 0.0, egui_knob::KnobStyle::Wiper)
+                    .with_middle_scroll()
                     .with_label("Range", egui_knob::LabelPosition::Bottom),
             );
             update_param!(setter, &params.comps[idx].range, db_to_gain_fast(range));
@@ -255,6 +314,7 @@ fn create_state_tooltip(
             let mut ratio = params.comps[idx].ratio.value();
             ui.add(
                 Knob::new(&mut ratio, 1.0, 10.0, egui_knob::KnobStyle::Wiper)
+                    .with_middle_scroll()
                     .with_label("Ratio", egui_knob::LabelPosition::Bottom),
             );
             update_param!(setter, &params.comps[idx].ratio, ratio);
@@ -262,6 +322,7 @@ fn create_state_tooltip(
             let mut attack = params.comps[idx].attack.value();
             ui.add(
                 Knob::new(&mut attack, 1.0, 1000.0, egui_knob::KnobStyle::Wiper)
+                    .with_middle_scroll()
                     .with_label("Attack [mS]", egui_knob::LabelPosition::Bottom)
                     .with_label_format(|x| format!("{:.0}", x))
                     .with_step(Some(1.0)),
@@ -271,16 +332,11 @@ fn create_state_tooltip(
             let mut release = params.comps[idx].release.value();
             ui.add(
                 Knob::new(&mut release, 10.0, 10000.0, egui_knob::KnobStyle::Wiper)
+                    .with_middle_scroll()
                     .with_label("Release [mS]", egui_knob::LabelPosition::Bottom)
                     .with_label_format(|x| format!("{:.0}", x)), // .with_step(Some(1.0)),
             );
             update_param!(setter, &params.comps[idx].release, release);
-
-            let mut sidechain = params.comps[idx].sidechain.value();
-
-            ui.add(egui::widgets::Checkbox::new(&mut sidechain, "sidechain"));
-
-            update_param!(setter, &params.comps[idx].sidechain, sidechain);
         })
     });
 }
@@ -297,6 +353,7 @@ pub fn build_editor(
         Default::default(),
         |_, _, _| {},
         move |egui_ctx, setter, _queue, _state| {
+            egui_extras::install_image_loaders(egui_ctx);
             ResizableWindow::new("res-wind")
                 .min_size(Vec2::new(640.0, 480.0))
                 .show(egui_ctx, egui_state.as_ref(), |ui| {
@@ -342,8 +399,14 @@ pub fn build_editor(
                         let sig1 = gain_to_db_fast(
                             peak_meter_val[1].load(std::sync::atomic::Ordering::Relaxed),
                         );
-                        ui.add(VolumeMeter::new(&sig0, MIN_POWER_DB as f32, 6.0).width(15.0));
-                        ui.add(VolumeMeter::new(&sig1, MIN_POWER_DB as f32, 6.0).width(15.0));
+                        ui.add(
+                            VolumeMeter::new(&sig0, nih_plug::util::MINUS_INFINITY_DB, 6.0)
+                                .width(15.0),
+                        );
+                        ui.add(
+                            VolumeMeter::new(&sig1, nih_plug::util::MINUS_INFINITY_DB, 6.0)
+                                .width(15.0),
+                        );
 
                         let plot = Plot::new("eq_plot")
                             .height(ui.available_height())
@@ -362,10 +425,13 @@ pub fn build_editor(
                                     let base = 10.0f64.powi(pow);
 
                                     // Major tick (the power of 10)
-                                    marks.push(egui_plot::GridMark {
-                                        value: pow as f64,
-                                        step_size: 1.0, // Used by egui to determine line thickness
-                                    });
+                                    //we're skipping the 10Hz
+                                    if base != 10.0 {
+                                        marks.push(egui_plot::GridMark {
+                                            value: pow as f64,
+                                            step_size: 1.0, // Used by egui to determine line thickness
+                                        });
+                                    }
 
                                     // Only draw if we aren't zoomed out too far to keep the UI clean
                                     for i in 2..10 {
@@ -404,6 +470,11 @@ pub fn build_editor(
                             {
                                 let uidata = ui_data.lock().unwrap();
 
+                                let shape_idx = if params.solo.value() == -1 {
+                                    3 * MAX_MBCS - 1
+                                } else {
+                                    params.solo.value() as usize
+                                };
                                 let main_line_shape_db: [f64; NUM_OF_FILTER_POINTS] =
                                     std::array::from_fn(|i| {
                                         nih_plug::util::gain_to_db_fast(
@@ -415,6 +486,10 @@ pub fn build_editor(
                                 {
                                     //FIXME: ffs write a normal function
                                     if filter_idx == 3 * MAX_MBCS - 1 {
+                                        continue;
+                                    }
+
+                                    if (filter_idx == 3 * MAX_MBCS) & (params.solo.value() != -1) {
                                         continue;
                                     }
 
@@ -457,7 +532,11 @@ pub fn build_editor(
                                             COLOR_BASELINE[filter_idx].gamma_multiply_u8(40),
                                         );
 
-                                        plot_ui.add(filledarea);
+                                        if params.solo.value() == filter_idx as i32 {
+                                            plot_ui.add(line);
+                                        } else {
+                                            plot_ui.add(filledarea);
+                                        }
                                     } else {
                                         plot_ui.line(line);
                                     }
@@ -707,12 +786,11 @@ pub fn build_editor(
                         .align(egui::RectAlign::BOTTOM)
                         .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
                         .open(params.comps[selected_index].enable.value())
-                        .frame(
-                            egui::Frame::new().corner_radius(10).fill(
-                                egui::Color32::BLACK
-                                    .blend(COLOR_BASELINE[selected_index].gamma_multiply_u8(60)),
-                            ),
-                        )
+                        .style(egui::style::StyleModifier::new(move |style| {
+                            style.visuals.window_fill = egui::Color32::BLACK
+                                .additive()
+                                .blend(COLOR_BASELINE[selected_index].gamma_multiply_u8(20));
+                        }))
                         .show(|ui| {
                             create_state_tooltip(ui, &params, &ui_data, setter);
                         });

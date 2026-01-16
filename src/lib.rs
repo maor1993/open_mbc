@@ -42,6 +42,9 @@ struct OpenMbcParams {
     #[nested(array, group = "Comps")]
     pub comps: [CompParams; MAX_MBCS],
 
+    #[id = "solo"]
+    pub solo: IntParam,
+
     #[id = "stereo_mix"]
     pub stereo_mix: FloatParam,
 
@@ -63,6 +66,12 @@ struct CompParams {
 
     #[id = "q"] //TODO: rename to octaves or convert to Q...
     pub q: FloatParam,
+
+    #[id = "slope"]
+    pub slope: EnumParam<crossover::FilterSlope>,
+
+    #[id = "filtertype"]
+    pub filtertype: EnumParam<crossover::FilterTypeCx>,
 
     #[id = "threshold"]
     pub threshold: FloatParam,
@@ -150,6 +159,14 @@ impl Default for CompParams {
                 },
             )
             .with_smoother(SmoothingStyle::Linear(DEFAULT_SMOOTHING_MSEC)),
+            slope: EnumParam::<crossover::FilterSlope>::new(
+                "Slope",
+                crossover::FilterSlope::Slope12dB,
+            ),
+            filtertype: EnumParam::<crossover::FilterTypeCx>::new(
+                "Filtertype",
+                crossover::FilterTypeCx::Bandpass,
+            ),
             threshold: FloatParam::new(
                 "Threshold",
                 util::db_to_gain(0.0),
@@ -221,7 +238,7 @@ impl Default for CompFilter {
     fn default() -> Self {
         Self {
             comp: Compressor::new(0.0),
-            filt: Crossover::new(0.0, FilterType::Bandpass),
+            filt: Crossover::new(0.0),
         }
     }
 }
@@ -248,6 +265,15 @@ impl Default for OpenMbcParams {
             editor_state: EguiState::from_size(1024, 640),
 
             comps: std::array::from_fn(|_| CompParams::default()),
+            solo: IntParam::new(
+                "solo_filter",
+                -1,
+                IntRange::Linear {
+                    min: -1,
+                    max: MAX_MBCS as i32,
+                },
+            )
+            .hide(),
             stereo_mix: FloatParam::new(
                 "stereo_mix",
                 1.0,
@@ -381,7 +407,8 @@ impl Plugin for OpenMbc {
                         if self.params.comps[idx].enable.value() {
                             let main_filter_mag = ui::utils::get_filter_shape(
                                 self.sample_rate,
-                                comp_filt[0].filt.get_main_filter(),
+                                &comp_filt[0].filt,
+                                self.params.comps[idx].slope.value(),
                                 1.0,
                             );
 
@@ -391,11 +418,18 @@ impl Plugin for OpenMbc {
 
                             // create solo shape
                             let gain = self.params.comps[idx].gain.value();
-                            for i in 0..NUM_OF_FILTER_POINTS {
-                                filt_plot[i] = (Complex64::ONE - main_filter_mag[i]
-                                    + main_filter_mag[i]
-                                        * (self.params.comps[idx].range.value() * gain) as f64)
-                                    .norm()
+
+                            if self.params.solo.value() == idx as i32 {
+                                for i in 0..NUM_OF_FILTER_POINTS {
+                                    filt_plot[i] = main_filter_mag[i].norm()
+                                }
+                            } else {
+                                for i in 0..NUM_OF_FILTER_POINTS {
+                                    filt_plot[i] = (Complex64::ONE - main_filter_mag[i]
+                                        + main_filter_mag[i]
+                                            * (self.params.comps[idx].range.value() * gain) as f64)
+                                        .norm()
+                                }
                             }
                         }
                     });
@@ -502,20 +536,16 @@ impl Plugin for OpenMbc {
                 for (idx, comp_filt) in self.comp_filt_state.iter_mut().enumerate() {
                     let this_comp_params = &self.params.comps[idx];
                     // handle bpf update
-                    if (this_comp_params.center_freq.smoothed.is_smoothing())
-                        || (this_comp_params.q.smoothed.is_smoothing()
-                            || (this_comp_params.gain.smoothed.is_smoothing()))
+                    if this_comp_params.center_freq.smoothed.is_smoothing()
+                        || this_comp_params.q.smoothed.is_smoothing()
+                        || this_comp_params.gain.smoothed.is_smoothing()
+                        || (this_comp_params.filtertype.value() != comp_filt[ch].filt.mode)
                     {
                         comp_filt[ch].filt.center_freq =
                             this_comp_params.center_freq.smoothed.next();
                         comp_filt[ch].filt.octaves = this_comp_params.q.smoothed.next();
 
-                        //TODO: let user choose this..
-                        comp_filt[ch].filt.mode = match comp_filt[ch].filt.center_freq {
-                            0.0..100.0 => FilterType::Lowpass,
-                            100.0..10000.0 => FilterType::Bandpass,
-                            _ => FilterType::Highpass,
-                        };
+                        comp_filt[ch].filt.mode = this_comp_params.filtertype.value();
 
                         comp_filt[ch].filt.configure();
                     }
@@ -560,12 +590,12 @@ impl Plugin for OpenMbc {
                 }
                 let mut total_crossover = 0.0;
                 let mut total_filt_comp = 0.0;
-
+                let mut sc_from_solo = 0.0;
                 for i in 0..MAX_MBCS {
                     if self.params.comps[i].enable.value() {
                         let comp_filt = &mut self.comp_filt_state[i];
 
-                        let stereo_mix = self.params.stereo_mix.value();
+                        let stereo_mix = self.params.stereo_mix.value() / 2.0;
                         //TODO: missing condtion on if we're using an actual side chain!
                         let sc_input = if self.params.comps[i].sidechain.value() {
                             aux_left_right
@@ -580,10 +610,17 @@ impl Plugin for OpenMbc {
                             ),
                         };
                         //filter
-                        let (filt_main, sc) = comp_filt[ch].filt.process(*sample, sc);
+                        let (filt_main, sc) = comp_filt[ch].filt.process(
+                            *sample,
+                            sc,
+                            self.params.comps[i].slope.value(),
+                        );
+
+                        if self.params.solo.value() == i as i32 {
+                            sc_from_solo = sc.unwrap_or(filt_main);
+                        }
 
                         //compress
-
                         let comp = comp_filt[ch].comp.process(filt_main, sc);
 
                         let gain = self.params.comps[i].gain.smoothed.next();
@@ -593,7 +630,11 @@ impl Plugin for OpenMbc {
                     }
                 }
 
-                let total_output = total_filt_comp + *sample - total_crossover;
+                let total_output = if self.params.solo.value() == -1 {
+                    total_filt_comp + *sample - total_crossover
+                } else {
+                    sc_from_solo
+                };
 
                 *sample = total_output;
 
@@ -625,8 +666,8 @@ impl Plugin for OpenMbc {
         }
         if self.spectrum_handle.samples_in_buf < NUM_OF_VIZ_FFT_POINTS {
             if self.params.editor_state.is_open() {
-                if self.spectrum_handle.samples_in_buf+samples_to_copy > NUM_OF_VIZ_FFT_POINTS{
-                    samples_to_copy = NUM_OF_VIZ_FFT_POINTS-self.spectrum_handle.samples_in_buf;
+                if self.spectrum_handle.samples_in_buf + samples_to_copy > NUM_OF_VIZ_FFT_POINTS {
+                    samples_to_copy = NUM_OF_VIZ_FFT_POINTS - self.spectrum_handle.samples_in_buf;
                 }
                 self.spectrum_handle.pre_comp_stft_handle.write_input(
                     0,

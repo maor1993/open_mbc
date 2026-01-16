@@ -1,10 +1,10 @@
 [package]
 name = "open_mbc"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Maor Malka <maor1993@outlook.com>"]
 license = "GPL-3.0-or-later"
-homepage = "https://youtu.be/dQw4w9WgXcQ"
+homepage = "https://github.com/maor1993/open_mbc"
 description = "Open Multi band compressor"
 
 [workspace]
@@ -29,8 +29,9 @@ anyhow = "1.0.100"
 
 egui_plot = {git="https://github.com/emilk/egui_plot.git"}
 num-complex = "0.4.6"
-egui_knob = "0.3.6"
+egui_knob = "0.3.9"
 splines = "5.0.0"
+egui_extras = { version = "0.33.3", features = ["svg"] }
 
 [dev-dependencies]
 plotters = {version = "0.3.7"}
