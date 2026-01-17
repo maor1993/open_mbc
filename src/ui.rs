@@ -41,6 +41,8 @@ pub const MAX_POWER_DB: isize = 12;
 pub const FREQ_STEP: f64 =
     (FREQ_RANGE_MAX_LOG10 - FREQ_RANGE_MIN_LOG10) / (NUM_OF_FILTER_POINTS as f64 - 1.0);
 
+pub const GAIN_STEP: f32 = (MAX_POWER_DB - MIN_POWER_DB) as f32 / 1024.0;
+
 static FREQUENCIES: OnceLock<[f64; NUM_OF_FILTER_POINTS]> = OnceLock::new();
 static FREQUENCIES_LOG10: OnceLock<[f64; NUM_OF_FILTER_POINTS]> = OnceLock::new();
 
@@ -115,6 +117,7 @@ impl PeakMeter {
 }
 
 pub struct UiData {
+    is_dragging: bool,
     curr_mbc_idx: usize,
     pub sample_rate: f32,
     filter_shapes: Vec<[f64; NUM_OF_FILTER_POINTS]>,
@@ -128,6 +131,7 @@ pub struct UiData {
 impl Default for UiData {
     fn default() -> Self {
         Self {
+            is_dragging: false,
             curr_mbc_idx: 0,
             sample_rate: 0.0,
             filter_shapes: vec![[0.0_f64; NUM_OF_FILTER_POINTS]; (MAX_MBCS * 3) + 1],
@@ -459,9 +463,24 @@ pub fn build_editor(
                                 }
                             })
                             .label_formatter(|_, value| {
-                                format!("freq:{:.0}\nGain:{:.2}", 10.0_f64.powf(value.x), value.y)
+                                let uidata = ui_data.lock().unwrap();
+                                if uidata.is_dragging {
+                                    format!(
+                                        "filter {}\nfreq:{:.0}\nGain:{:.2}",
+                                        uidata.curr_mbc_idx,
+                                        params.comps[uidata.curr_mbc_idx].center_freq.value(),
+                                        gain_to_db_fast(
+                                            params.comps[uidata.curr_mbc_idx].gain.value()
+                                        )
+                                    )
+                                } else {
+                                    format!(
+                                        "freq:{:.0}\nGain:{:.2}",
+                                        10.0_f64.powf(value.x),
+                                        value.y
+                                    )
+                                }
                             });
-                        // .label_formatter(|_, _| "".to_owned()); // Disable default tooltip
                         let resp = plot.show(ui, |plot_ui| {
                             plot_ui.set_plot_bounds(egui_plot::PlotBounds::from_min_max(
                                 [FREQ_RANGE_MIN_LOG10, MIN_POWER_DB as f64],
@@ -738,30 +757,43 @@ pub fn build_editor(
                                     }
                                 }
                             }
+                            {
+                                let mut uidata = ui_data.lock().unwrap();
+                                let selected_index = uidata.curr_mbc_idx;
+                                uidata.is_dragging = plot_ui.response().dragged();
+                                if uidata.is_dragging {
+                                    let drag_delta = plot_ui.response().drag_motion();
 
-                            let selected_index = ui_data.lock().unwrap().curr_mbc_idx;
-                            if plot_ui.response().dragged() {
-                                let drag_delta = plot_ui.response().drag_motion();
+                                    let new_center_freq = 10.0_f32.powf(
+                                        params.comps[selected_index].center_freq.value().log10()
+                                            + drag_delta.x * FREQ_STEP as f32,
+                                    );
 
-                                let new_center_freq = 10.0_f32.powf(
-                                    params.comps[selected_index].center_freq.value().log10()
-                                        + drag_delta.x * FREQ_STEP as f32,
-                                );
+                                    let new_gain = db_to_gain_fast(
+                                        gain_to_db_fast(params.comps[selected_index].gain.value())
+                                            - drag_delta.y * GAIN_STEP,
+                                    );
 
-                                let new_gain =
-                                    params.comps[selected_index].gain.value() - drag_delta.y * 0.01;
-                                // info!("drag delta :{:?} new freq: {} new gain: {}", drag_delta, new_center_freq,new_gain);
-                                update_param!(
-                                    setter,
-                                    &params.comps[selected_index].center_freq,
-                                    new_center_freq
-                                );
-                                update_param!(setter, &params.comps[selected_index].gain, new_gain);
+                                    // plot.label_formatter(|_, _| {
+                                    // format!("freq:{:.0}\nGain:{:.2}", new_center_freq, new_gain)});
+
+                                    // info!("drag delta :{:?} new freq: {} new gain: {}", drag_delta, new_center_freq,new_gain);
+                                    update_param!(
+                                        setter,
+                                        &params.comps[selected_index].center_freq,
+                                        new_center_freq
+                                    );
+                                    // update_param!(
+                                    //     setter,
+                                    //     &params.comps[selected_index].gain,
+                                    //     new_gain
+                                    // );
+                                }
                             }
                         });
-
                         resp
                     });
+
                     let selected_index = ui_data.lock().unwrap().curr_mbc_idx;
                     let old_octaves = params.comps[selected_index].q.value();
                     if resp.inner.response.hovered() {
