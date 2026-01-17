@@ -22,7 +22,7 @@ nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev="28b149ec4
     "assert_process_allocs",
     "standalone"
 ] }
-nih_plug_egui = { git = "https://codeberg.org/maor1993/egui-baseview.git", branch = "main" }
+nih_plug_egui = { git = "https://codeberg.org/billyDM/egui-baseview.git", branch = "main" ,features = ["keyboard_focus_workaround"]}
 cute-dsp = { git = "https://github.com/maor1993/RSCuteDSP.git", features = ["std"] }
 crossbeam = "0.8.4"
 anyhow = "1.0.100"
