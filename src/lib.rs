@@ -53,6 +53,7 @@ struct OpenMbcParams {
 }
 
 const MAX_MBCS: usize = 5;
+const MAX_MBCS_2X: usize = MAX_MBCS * 2;
 const FREQ_RANGE_MIN: f32 = 10.0;
 const FREQ_RANGE_MAX: f32 = 20_000.0;
 
@@ -396,6 +397,7 @@ impl Plugin for OpenMbc {
 
         if self.params.editor_state.is_open() {
             if let Ok(mut uidata) = self.ui_data.try_lock() {
+                //TODO: might skip this as we process all the relevant indecies anyway
                 uidata.set_filter_shape(0.0);
 
                 let mut main_filters = [[Complex64::new(0.0, 0.0); NUM_OF_FILTER_POINTS]; MAX_MBCS];
@@ -414,21 +416,34 @@ impl Plugin for OpenMbc {
 
                             main_filters[idx].copy_from_slice(&main_filter_mag);
 
-                            let filt_plot = uidata.borrow_filter_shape(idx).unwrap();
-
                             // create solo shape
                             let gain = self.params.comps[idx].gain.value();
-
-                            if self.params.solo.value() == idx as i32 {
-                                for i in 0..NUM_OF_FILTER_POINTS {
-                                    filt_plot[i] = main_filter_mag[i].norm()
+                            {
+                                let filt_plot = uidata.borrow_filter_shape(idx).unwrap();
+                                if self.params.solo.value() == idx as i32 {
+                                    for i in 0..NUM_OF_FILTER_POINTS {
+                                        filt_plot[i] = main_filter_mag[i].norm()
+                                    }
+                                } else {
+                                    for i in 0..NUM_OF_FILTER_POINTS {
+                                        filt_plot[i] = (Complex64::ONE - main_filter_mag[i]
+                                            + main_filter_mag[i]
+                                                * (self.params.comps[idx].range.value() * gain)
+                                                    as f64)
+                                            .norm();
+                                    }
                                 }
-                            } else {
+                            }
+
+                            // create no range plot
+                            {
+                                let filt_plot_no_range =
+                                    uidata.borrow_filter_shape(MAX_MBCS + idx).unwrap();
+
                                 for i in 0..NUM_OF_FILTER_POINTS {
-                                    filt_plot[i] = (Complex64::ONE - main_filter_mag[i]
-                                        + main_filter_mag[i]
-                                            * (self.params.comps[idx].range.value() * gain) as f64)
-                                        .norm()
+                                    filt_plot_no_range[i] = (Complex64::ONE - main_filter_mag[i]
+                                        + main_filter_mag[i] * gain as f64)
+                                        .norm();
                                 }
                             }
                         }

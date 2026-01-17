@@ -23,8 +23,8 @@ use nih_plug_egui::{
 
 use nih_plug::util::MINUS_INFINITY_DB;
 
-use crate::MAX_MBCS;
 use crate::{crossover, OpenMbcParams};
+use crate::{MAX_MBCS, MAX_MBCS_2X};
 
 use crate::{FREQ_RANGE_MAX, FREQ_RANGE_MIN};
 pub const NUM_OF_FILTER_POINTS: usize = 1024; //used for visualization, might need to interpolate
@@ -488,22 +488,11 @@ pub fn build_editor(
                             ));
                             {
                                 let uidata = ui_data.lock().unwrap();
-
-                                let shape_idx = if params.solo.value() == -1 {
-                                    3 * MAX_MBCS - 1
-                                } else {
-                                    params.solo.value() as usize
-                                };
-                                let main_line_shape_db: [f64; NUM_OF_FILTER_POINTS] =
-                                    std::array::from_fn(|i| {
-                                        nih_plug::util::gain_to_db_fast(
-                                            uidata.filter_shapes[3 * MAX_MBCS - 1][i] as f32,
-                                        ) as f64
-                                    });
                                 for (filter_idx, filter_shape) in
                                     uidata.filter_shapes.iter().enumerate()
                                 {
                                     //FIXME: ffs write a normal function
+
                                     if filter_idx == 3 * MAX_MBCS - 1 {
                                         continue;
                                     }
@@ -530,7 +519,7 @@ pub fn build_editor(
                                         .collect();
 
                                     let color = match filter_idx {
-                                        0..MAX_MBCS => COLOR_BASELINE[filter_idx],
+                                        0..MAX_MBCS_2X => COLOR_BASELINE[filter_idx % MAX_MBCS],
                                         _ => COLOR_COMP_LINE,
                                     };
 
@@ -538,9 +527,14 @@ pub fn build_editor(
                                         egui_plot::Line::new("", points).color(color).width(2.0);
                                     //TODO: this is a kombina for now
                                     if (0..MAX_MBCS).contains(&filter_idx) {
-                                        // let filter_shape_min:Vec<f64> = filter_shape_db.iter().zip(main_line_shape_db).map(|(&y,main)| y-main).collect();
-                                        // let filter_shape_max:[f64;NUM_OF_FILTER_POINTS] = filter_shape_db;
-
+                                        let main_line_shape_db: [f64; NUM_OF_FILTER_POINTS] =
+                                            std::array::from_fn(|i| {
+                                                nih_plug::util::gain_to_db_fast(
+                                                    uidata.filter_shapes[MAX_MBCS + filter_idx][i]
+                                                        as f32,
+                                                )
+                                                    as f64
+                                            });
                                         let filledarea = egui_plot::FilledArea::new(
                                             format!("filter {}", filter_idx),
                                             freq_bins,
@@ -551,12 +545,21 @@ pub fn build_editor(
                                             COLOR_BASELINE[filter_idx].gamma_multiply_u8(40),
                                         );
 
-                                        if params.solo.value() == filter_idx as i32 {
-                                            plot_ui.add(line);
-                                        } else {
+                                        if params.solo.value() != filter_idx as i32 {
                                             plot_ui.add(filledarea);
+                                            plot_ui.add(
+                                                line.color(
+                                                    COLOR_BASELINE[filter_idx]
+                                                        .gamma_multiply_u8(90),
+                                                )
+                                                .width(1.0),
+                                            );
+                                        } else {
+                                            plot_ui.add(
+                                                line.color(COLOR_BASELINE[filter_idx]).width(1.0),
+                                            );
                                         }
-                                    } else {
+                                    } else if filter_idx > MAX_MBCS_2X {
                                         plot_ui.line(line);
                                     }
                                 }
@@ -688,13 +691,33 @@ pub fn build_editor(
                                             .filled(true),
                                     );
                                     {
-                                        let q = params.comps[i].q.value();
-                                        let freq = params.comps[i].center_freq.value();
-                                        let f0_2q = freq / (q * 2.0);
-                                        let f0_sqrt_q = freq * (1.0 + 1.0 / (4.0 * q * q)).sqrt();
+                                        let (filt_min, filt_max) =
+                                            match params.comps[i].filtertype.value() {
+                                                crossover::FilterTypeCx::Bandpass => {
+                                                    let q = params.comps[i].q.value()
+                                                        * (params.comps[i].slope.value() as usize)
+                                                            as f32;
+                                                    let freq = params.comps[i].center_freq.value();
+                                                    let f0_2q = freq / (q * 2.0);
+                                                    let f0_sqrt_q =
+                                                        freq * (1.0 + 1.0 / (4.0 * q * q)).sqrt();
 
-                                        let filt_min = (f0_sqrt_q - f0_2q) as f64;
-                                        let filt_max = (f0_sqrt_q + f0_2q) as f64;
+                                                    let filt_min = (f0_sqrt_q - f0_2q) as f64;
+                                                    let filt_max = (f0_sqrt_q + f0_2q) as f64;
+
+                                                    (filt_min, filt_max)
+                                                }
+                                                crossover::FilterTypeCx::Highpass => {
+                                                    let freq = params.comps[i].center_freq.value();
+
+                                                    (FREQ_RANGE_MIN as f64, freq as f64)
+                                                }
+                                                crossover::FilterTypeCx::Lowpass => {
+                                                    let freq = params.comps[i].center_freq.value();
+
+                                                    (freq as f64, FREQ_RANGE_MAX as f64)
+                                                }
+                                            };
 
                                         let span = egui_plot::Span::new(
                                             format!("filter {}", i),
