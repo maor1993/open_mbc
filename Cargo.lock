@@ -1044,7 +1044,7 @@ dependencies = [
 [[package]]
 name = "egui-baseview"
 version = "0.7.0"
-source = "git+https://codeberg.org/billyDM/egui-baseview.git?branch=main#e8a43d4c4029f9380206a52777d10c0ddbbb1d66"
+source = "git+https://codeberg.org/maor1993/egui-baseview.git?branch=main#cf423a476368fde536b11dec634e086b53be3d96"
 dependencies = [
  "baseview 0.1.0 (git+https://github.com/RustAudio/baseview.git?rev=237d323c729f3aa99476ba3efa50129c5e86cad3)",
  "copypasta",
@@ -2093,7 +2093,7 @@ dependencies = [
 [[package]]
 name = "nih_plug_egui"
 version = "0.1.0"
-source = "git+https://codeberg.org/billyDM/egui-baseview.git?branch=main#e8a43d4c4029f9380206a52777d10c0ddbbb1d66"
+source = "git+https://codeberg.org/maor1993/egui-baseview.git?branch=main#cf423a476368fde536b11dec634e086b53be3d96"
 dependencies = [
  "baseview 0.1.0 (git+https://github.com/RustAudio/baseview.git?rev=237d323c729f3aa99476ba3efa50129c5e86cad3)",
  "crossbeam",

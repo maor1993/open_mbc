@@ -119,6 +119,7 @@ impl PeakMeter {
 pub struct UiData {
     is_dragging: bool,
     curr_mbc_idx: usize,
+    gui_scale: f32,
     pub sample_rate: f32,
     filter_shapes: Vec<[f64; NUM_OF_FILTER_POINTS]>,
     pub prev_spectrogram_pre: [f32; NUM_OF_VIZ_FFT_POINTS / 2],
@@ -134,6 +135,7 @@ impl Default for UiData {
             is_dragging: false,
             curr_mbc_idx: 0,
             sample_rate: 0.0,
+            gui_scale: 1.0,
             filter_shapes: vec![[0.0_f64; NUM_OF_FILTER_POINTS]; (MAX_MBCS * 3) + 1],
             prev_spectrogram_pre: [f32::NEG_INFINITY; NUM_OF_VIZ_FFT_POINTS / 2],
             prev_spectrogram_post: [f32::NEG_INFINITY; NUM_OF_VIZ_FFT_POINTS / 2],
@@ -345,6 +347,37 @@ fn create_state_tooltip(
     });
 }
 
+const BASELINE_SIZE: Vec2 = Vec2::new(640.0, 480.0);
+
+fn panel_baseline<R>(
+    id: &str,
+    context: &egui::Context,
+    egui_state: &EguiState,
+    scale: f32,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    egui::CentralPanel::default().show(context, move |ui| {
+        let id = egui::Id::new(id);
+        let ui_rect = ui.clip_rect();
+        let mut content_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(ui_rect)
+                .layout(*ui.layout()),
+        );
+
+        let ret = add_contents(&mut content_ui);
+
+        if egui_state.size().0 != (BASELINE_SIZE.x * scale).round() as u32 {
+            egui_state.set_requested_size((
+                (BASELINE_SIZE.x * scale).round() as u32,
+                (BASELINE_SIZE.y * scale).round() as u32,
+            ));
+        }
+
+        ret
+    })
+}
+
 pub fn build_editor(
     params: Arc<OpenMbcParams>,
     egui_state: Arc<EguiState>,
@@ -358,9 +391,16 @@ pub fn build_editor(
         |_, _, _| {},
         move |egui_ctx, setter, _queue, _state| {
             egui_extras::install_image_loaders(egui_ctx);
-            ResizableWindow::new("res-wind")
-                .min_size(Vec2::new(640.0, 480.0))
-                .show(egui_ctx, egui_state.as_ref(), |ui| {
+            let next_gui_scale = ui_data.lock().unwrap().gui_scale;
+
+            panel_baseline(
+                "main",
+                egui_ctx,
+                egui_state.as_ref(),
+                next_gui_scale,
+                |ui| {
+                    let plot_color = Color32::from_hex("#161a19").unwrap();
+                    ui.visuals_mut().extreme_bg_color = plot_color;
                     ui.horizontal(|ui| {
                         ui.vertical_centered(|ui| {
                             ui.set_max_width(480.0);
@@ -391,7 +431,6 @@ pub fn build_editor(
                         );
                     });
                     let window_height = ui.available_height();
-                    // create_state_tooltip(ui, &params, &ui_data, setter);
                     let resp = ui.horizontal(|ui| {
                         ui.set_min_height(window_height - 20.0);
 
@@ -481,11 +520,13 @@ pub fn build_editor(
                                     )
                                 }
                             });
+
                         let resp = plot.show(ui, |plot_ui| {
                             plot_ui.set_plot_bounds(egui_plot::PlotBounds::from_min_max(
                                 [FREQ_RANGE_MIN_LOG10, MIN_POWER_DB as f64],
                                 [FREQ_RANGE_MAX_LOG10, MAX_POWER_DB as f64],
                             ));
+
                             {
                                 let uidata = ui_data.lock().unwrap();
                                 for (filter_idx, filter_shape) in
@@ -723,7 +764,7 @@ pub fn build_editor(
                                             format!("filter {}", i),
                                             filt_min.log10()..=filt_max.log10(),
                                         )
-                                        .fill(COLOR_BASELINE[i].gamma_multiply_u8(10));
+                                        .fill(COLOR_BASELINE[i].gamma_multiply_u8(20));
 
                                         plot_ui.span(span);
                                     }
@@ -867,8 +908,21 @@ pub fn build_editor(
                                 .custom_formatter(|val, _| format!("{:.0}%", val * 100.0)),
                         );
                         update_param!(setter, &params.stereo_mix, stereo_mix);
+                        {
+                            let mut uidata = ui_data.lock().unwrap();
+                            let lastscale = uidata.gui_scale;
+                            egui::containers::ComboBox::from_label("Gui Scale")
+                                .selected_text(format!("{:.0}%", 100.0 * uidata.gui_scale))
+                                .show_ui(ui, |ui| {
+                                    // ui.selectable_value(&mut uidata.gui_scale, 0.5, "50%");
+                                    ui.selectable_value(&mut uidata.gui_scale, 1.0, "100%");
+                                    ui.selectable_value(&mut uidata.gui_scale, 1.5, "150%");
+                                    ui.selectable_value(&mut uidata.gui_scale, 2.0, "200%");
+                                });
+                        }
                     })
-                });
+                },
+            );
             // });
         },
     )
