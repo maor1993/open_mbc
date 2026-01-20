@@ -2531,6 +2531,7 @@ dependencies = [
  "nih_plug",
  "nih_plug_egui",
  "num-complex",
+ "pitchy",
  "plotters",
  "splines",
  "vergen-git2",
@@ -2703,6 +2704,12 @@ name = "pin-utils"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
+
+[[package]]
+name = "pitchy"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30d1d821a5ddcac0dd98f59f61652531c0520e93e85f48a73609c04bcee456dd"
 
 [[package]]
 name = "pkg-config"

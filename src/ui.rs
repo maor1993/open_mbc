@@ -17,11 +17,10 @@ use nih_plug::{
 use nih_plug_egui::{
     create_egui_editor,
     egui::{self, widgets::ProgressBar, Color32, FontId, RichText, Vec2},
-    resizable_window::ResizableWindow,
     EguiState,
 };
 
-use nih_plug::util::MINUS_INFINITY_DB;
+use pitchy;
 
 use crate::{crossover, OpenMbcParams};
 use crate::{MAX_MBCS, MAX_MBCS_2X};
@@ -503,11 +502,17 @@ pub fn build_editor(
                             })
                             .label_formatter(|_, value| {
                                 let uidata = ui_data.lock().unwrap();
+
+                                let pitch = pitchy::Pitch::new(
+                                    params.comps[uidata.curr_mbc_idx].center_freq.value() as f64,
+                                );
+                                let note = pitchy::Note::try_from(pitch).unwrap();
                                 if uidata.is_dragging {
                                     format!(
-                                        "filter {}\nfreq:{:.0}\nGain:{:.2}",
+                                        "filter {}\nfreq:{:.0}\nNote:{}\nGain:{:.2}",
                                         uidata.curr_mbc_idx,
                                         params.comps[uidata.curr_mbc_idx].center_freq.value(),
+                                        note.name(),
                                         gain_to_db_fast(
                                             params.comps[uidata.curr_mbc_idx].gain.value()
                                         )

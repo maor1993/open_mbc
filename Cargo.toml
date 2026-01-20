@@ -32,6 +32,7 @@ num-complex = "0.4.6"
 egui_knob = "0.3.9"
 splines = "5.0.0"
 egui_extras = { version = "0.33.3", features = ["svg"] }
+pitchy = "0.2.0"
 
 [dev-dependencies]
 plotters = {version = "0.3.7"}
