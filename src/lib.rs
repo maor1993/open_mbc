@@ -1,5 +1,3 @@
-use cute_dsp::filters::FilterType;
-use nih_plug::log::info;
 use nih_plug::prelude::*;
 use nih_plug::util::gain_to_db_fast;
 use num_complex::Complex64;

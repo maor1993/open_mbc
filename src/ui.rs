@@ -1,19 +1,17 @@
-use egui_plot::{AxisHints, HPlacement, Plot};
+use egui_plot::Plot;
 use std::{
     f32, f64,
     sync::{Arc, Mutex},
 };
 
-use egui_knob::Knob;
 
 use splines::{self, Key};
 
 use nih_plug::{
     editor::Editor,
-    log::info,
-    params::FloatParam,
+    // log::info,
     prelude::{AtomicF32, ParamSetter},
-    util::{db_to_gain_fast, gain_to_db_fast},
+    util::{gain_to_db_fast},
 };
 use nih_plug_egui::{
     create_egui_editor,
@@ -41,7 +39,7 @@ pub const MAX_POWER_DB: isize = 12;
 pub const FREQ_STEP: f64 =
     (FREQ_RANGE_MAX_LOG10 - FREQ_RANGE_MIN_LOG10) / (NUM_OF_FILTER_POINTS as f64 - 1.0);
 
-pub const GAIN_STEP: f32 = (MAX_POWER_DB - MIN_POWER_DB) as f32 / 1024.0;
+// pub const GAIN_STEP: f32 = (MAX_POWER_DB - MIN_POWER_DB) as f32 / 1024.0;
 
 static FREQUENCIES: OnceLock<[f64; NUM_OF_FILTER_POINTS]> = OnceLock::new();
 static FREQUENCIES_LOG10: OnceLock<[f64; NUM_OF_FILTER_POINTS]> = OnceLock::new();
@@ -368,7 +366,7 @@ fn panel_baseline<R>(
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<R> {
     egui::CentralPanel::default().show(context, move |ui| {
-        let id = egui::Id::new(id);
+        let _ = egui::Id::new(id);
         let ui_rect = ui.clip_rect();
         let mut content_ui = ui.new_child(
             egui::UiBuilder::new()
@@ -870,10 +868,10 @@ pub fn build_editor(
                                             + drag_delta.x * FREQ_STEP as f32,
                                     );
 
-                                    let new_gain = db_to_gain_fast(
-                                        gain_to_db_fast(params.comps[selected_index].gain.value())
-                                            - drag_delta.y * GAIN_STEP,
-                                    );
+                                    // let new_gain = db_to_gain_fast(
+                                    //     gain_to_db_fast(params.comps[selected_index].gain.value())
+                                    //         - drag_delta.y * GAIN_STEP,
+                                    // );
 
                                     // plot.label_formatter(|_, _| {
                                     // format!("freq:{:.0}\nGain:{:.2}", new_center_freq, new_gain)});
@@ -947,7 +945,7 @@ pub fn build_editor(
                         update_param!(setter, &params.stereo_mix, stereo_mix);
                         {
                             let mut uidata = ui_data.lock().unwrap();
-                            let lastscale = uidata.gui_scale;
+                            // let lastscale = uidata.gui_scale;
                             egui::containers::ComboBox::from_label("Gui Scale")
                                 .selected_text(format!("{:.0}%", 100.0 * uidata.gui_scale))
                                 .show_ui(ui, |ui| {
