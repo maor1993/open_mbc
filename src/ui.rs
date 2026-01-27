@@ -11,6 +11,7 @@ use splines::{self, Key};
 use nih_plug::{
     editor::Editor,
     log::info,
+    params::FloatParam,
     prelude::{AtomicF32, ParamSetter},
     util::{db_to_gain_fast, gain_to_db_fast},
 };
@@ -78,11 +79,17 @@ pub fn get_frequencies_log10() -> &'static [f64; NUM_OF_FILTER_POINTS] {
 }
 
 pub mod utils;
+
+use utils::update_param;
 pub const PEAK_METER_DECAY_MS: f32 = 150.0;
 
 mod volumemeter;
 
 use volumemeter::VolumeMeter;
+
+mod knob;
+use knob::*;
+
 #[derive(Default, Debug)]
 pub struct PeakMeter {
     current: f32,
@@ -118,6 +125,7 @@ impl PeakMeter {
 pub struct UiData {
     is_dragging: bool,
     curr_mbc_idx: usize,
+    prev_mbc_idx: usize,
     gui_scale: f32,
     pub sample_rate: f32,
     filter_shapes: Vec<[f64; NUM_OF_FILTER_POINTS]>,
@@ -133,6 +141,7 @@ impl Default for UiData {
         Self {
             is_dragging: false,
             curr_mbc_idx: 0,
+            prev_mbc_idx: 0,
             sample_rate: 0.0,
             gui_scale: 1.0,
             filter_shapes: vec![[0.0_f64; NUM_OF_FILTER_POINTS]; (MAX_MBCS * 3) + 1],
@@ -167,28 +176,24 @@ impl UiData {
     //  }
 }
 
-macro_rules! update_param {
-    ($a:expr,$b:expr,$c:expr) => {
-        if $b.value() != $c {
-            $a.begin_set_parameter($b);
-            $a.set_parameter($b, $c);
-            $a.end_set_parameter($b);
-        }
-    };
-}
-
 fn create_state_tooltip(
     ui: &mut egui::Ui,
     params: &Arc<OpenMbcParams>,
     ui_data: &Arc<Mutex<UiData>>,
     setter: &ParamSetter<'_>,
 ) {
-    let last_idx = ui_data.lock().unwrap().curr_mbc_idx;
+    let (curr_idx, last_idx, curr_gain_reduction) = {
+        let uidata = ui_data.lock().unwrap();
+
+        (
+            uidata.curr_mbc_idx,
+            uidata.prev_mbc_idx,
+            uidata.gain_reduction.clone(),
+        )
+    };
 
     let idx = last_idx;
-
-    //TODO: currently we're locking and unlocking many times, might need to be more efficient here.
-    let curr_gain_reduction = ui_data.lock().unwrap().gain_reduction.clone();
+    let idx_changed = curr_idx != last_idx;
 
     ui.horizontal(|ui| {
         let mut enable = params.comps[idx].enable.value();
@@ -263,87 +268,94 @@ fn create_state_tooltip(
         });
         ui.label("filter");
         ui.horizontal(|ui| {
-            let mut octaves = params.comps[idx].q.value();
-            ui.add(
-                Knob::new(&mut octaves, 0.01, 10.0, egui_knob::KnobStyle::Wiper)
-                    .with_double_click_reset(1.0)
-                    .with_middle_scroll()
-                    .with_label("Q", egui_knob::LabelPosition::Bottom),
+            build_knob(
+                ui,
+                &params.comps[idx].q,
+                setter,
+                "Q",
+                false,
+                None,
+                idx_changed,
+                knob::Format::None,
             );
-            update_param!(setter, &params.comps[idx].q, octaves);
-
-            let mut freq = params.comps[idx].center_freq.value();
-            ui.add(
-                Knob::new(
-                    &mut freq,
-                    FREQ_RANGE_MIN,
-                    FREQ_RANGE_MAX,
-                    egui_knob::KnobStyle::Wiper,
-                )
-                .with_label("Freq", egui_knob::LabelPosition::Bottom)
-                .with_middle_scroll()
-                .with_step(Some(10.0)),
+            build_knob(
+                ui,
+                &params.comps[idx].center_freq,
+                setter,
+                "Freq",
+                false,
+                Some(10.0),
+                idx_changed,
+                Some(|x| format!("{:.0}", x)),
             );
-            update_param!(setter, &params.comps[idx].center_freq, freq);
-
-            let mut gain = gain_to_db_fast(params.comps[idx].gain.value());
-            ui.add(
-                Knob::new(&mut gain, -30.0, 30.0, egui_knob::KnobStyle::Wiper)
-                    .with_double_click_reset(0.0)
-                    .with_middle_scroll()
-                    .with_label("Gain[dB]", egui_knob::LabelPosition::Bottom),
+            build_knob(
+                ui,
+                &params.comps[idx].gain,
+                setter,
+                "Gain",
+                true,
+                None,
+                idx_changed,
+                knob::Format::None,
             );
-            update_param!(setter, &params.comps[idx].gain, db_to_gain_fast(gain));
         });
         ui.label("compressor");
         ui.horizontal(|ui| {
-            let mut threshold = gain_to_db_fast(params.comps[idx].threshold.value());
-            ui.add(
-                Knob::new(&mut threshold, -60.0, 0.0, egui_knob::KnobStyle::Wiper)
-                    .with_middle_scroll()
-                    .with_label("Threshold", egui_knob::LabelPosition::Bottom),
-            );
-            update_param!(
-                setter,
+            build_knob(
+                ui,
                 &params.comps[idx].threshold,
-                db_to_gain_fast(threshold)
+                setter,
+                "Threshold",
+                true,
+                None,
+                idx_changed,
+                knob::Format::None,
             );
-            let mut range = gain_to_db_fast(params.comps[idx].range.value());
-            ui.add(
-                Knob::new(&mut range, -30.0, 0.0, egui_knob::KnobStyle::Wiper)
-                    .with_middle_scroll()
-                    .with_label("Range", egui_knob::LabelPosition::Bottom),
+            build_knob(
+                ui,
+                &params.comps[idx].range,
+                setter,
+                "Range",
+                true,
+                None,
+                idx_changed,
+                knob::Format::None,
             );
-            update_param!(setter, &params.comps[idx].range, db_to_gain_fast(range));
 
-            let mut ratio = params.comps[idx].ratio.value();
-            ui.add(
-                Knob::new(&mut ratio, 1.0, 10.0, egui_knob::KnobStyle::Wiper)
-                    .with_middle_scroll()
-                    .with_label("Ratio", egui_knob::LabelPosition::Bottom),
+            build_knob(
+                ui,
+                &params.comps[idx].ratio,
+                setter,
+                "Ratio",
+                false,
+                Some(0.1),
+                idx_changed,
+                knob::Format::None,
             );
-            update_param!(setter, &params.comps[idx].ratio, ratio);
-
-            let mut attack = params.comps[idx].attack.value();
-            ui.add(
-                Knob::new(&mut attack, 1.0, 1000.0, egui_knob::KnobStyle::Wiper)
-                    .with_middle_scroll()
-                    .with_label("Attack [mS]", egui_knob::LabelPosition::Bottom)
-                    .with_label_format(|x| format!("{:.0}", x))
-                    .with_step(Some(1.0)),
+            build_knob(
+                ui,
+                &params.comps[idx].attack,
+                setter,
+                "Attack",
+                false,
+                Some(1.0),
+                idx_changed,
+                Some(|x| format!("{:.0}", x)),
             );
-            update_param!(setter, &params.comps[idx].attack, attack);
-
-            let mut release = params.comps[idx].release.value();
-            ui.add(
-                Knob::new(&mut release, 10.0, 10000.0, egui_knob::KnobStyle::Wiper)
-                    .with_middle_scroll()
-                    .with_label("Release [mS]", egui_knob::LabelPosition::Bottom)
-                    .with_label_format(|x| format!("{:.0}", x)), // .with_step(Some(1.0)),
+            build_knob(
+                ui,
+                &params.comps[idx].release,
+                setter,
+                "Release",
+                false,
+                Some(1.0),
+                idx_changed,
+                Some(|x| format!("{:.0}", x)),
             );
-            update_param!(setter, &params.comps[idx].release, release);
         })
     });
+
+    ui_data.lock().unwrap().prev_mbc_idx = curr_idx;
 }
 
 const BASELINE_SIZE: Vec2 = Vec2::new(640.0, 480.0);
@@ -506,7 +518,27 @@ pub fn build_editor(
                                 let pitch = pitchy::Pitch::new(
                                     params.comps[uidata.curr_mbc_idx].center_freq.value() as f64,
                                 );
-                                let note = pitchy::Note::try_from(pitch).unwrap();
+                                let note = match pitchy::Note::try_from(pitch) {
+                                    Ok(val) => val,
+                                    Err(e) => match e {
+                                        pitchy::PitchyError::OutOfMidiRange(x) => {
+                                            if x >= 127 {
+                                                pitchy::Note::new(
+                                                    pitchy::NoteLetter::G,
+                                                    pitchy::Accidental::Natural,
+                                                    9,
+                                                )
+                                            } else {
+                                                pitchy::Note::new(
+                                                    pitchy::NoteLetter::C,
+                                                    pitchy::Accidental::Natural,
+                                                    -1,
+                                                )
+                                            }
+                                        }
+                                        _ => panic!(""),
+                                    },
+                                };
                                 if uidata.is_dragging {
                                     format!(
                                         "filter {}\nfreq:{:.0}\nNote:{}\nGain:{:.2}",
