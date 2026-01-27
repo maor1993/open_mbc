@@ -22,7 +22,7 @@ nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev="28b149ec4
     "assert_process_allocs",
     "standalone"
 ] }
-nih_plug_egui = { git = "https://codeberg.org/billyDM/egui-baseview.git", branch = "main" ,features = ["keyboard_focus_workaround"]}
+nih_plug_egui = { git = "https://codeberg.org/maor1993/egui-baseview.git", branch = "main" ,features = ["keyboard_focus_workaround"]}
 cute-dsp = { git = "https://github.com/maor1993/RSCuteDSP.git", features = ["std"] }
 crossbeam = "0.8.4"
 anyhow = "1.0.100"
@@ -32,6 +32,7 @@ num-complex = "0.4.6"
 egui_knob = "0.3.9"
 splines = "5.0.0"
 egui_extras = { version = "0.33.3", features = ["svg"] }
+pitchy = "0.2.0"
 
 [dev-dependencies]
 plotters = {version = "0.3.7"}

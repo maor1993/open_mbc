@@ -20,3 +20,14 @@ pub fn get_filter_shape(
 
     res
 }
+
+macro_rules! update_param {
+    ($a:expr,$b:expr,$c:expr) => {
+        if $b.value() != $c {
+            $a.begin_set_parameter($b);
+            $a.set_parameter($b, $c);
+            $a.end_set_parameter($b);
+        }
+    };
+}
+pub(crate) use update_param;

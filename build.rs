@@ -1,5 +1,5 @@
 use anyhow::Result;
-use vergen_git2::{BuildBuilder, CargoBuilder, Emitter, Git2Builder, RustcBuilder, SysinfoBuilder};
+use vergen_git2::{Emitter, Git2Builder};
 
 pub fn main() -> Result<()> {
     Emitter::default()

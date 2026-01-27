@@ -1,5 +1,3 @@
-use cute_dsp::filters::FilterType;
-use nih_plug::log::info;
 use nih_plug::prelude::*;
 use nih_plug::util::gain_to_db_fast;
 use num_complex::Complex64;
@@ -53,6 +51,7 @@ struct OpenMbcParams {
 }
 
 const MAX_MBCS: usize = 5;
+const MAX_MBCS_2X: usize = MAX_MBCS * 2;
 const FREQ_RANGE_MIN: f32 = 10.0;
 const FREQ_RANGE_MAX: f32 = 20_000.0;
 
@@ -97,6 +96,7 @@ struct CompParams {
 struct SpecturmSubSystem {
     pre_comp_stft_handle: STFT<f32>,
     post_comp_stft_handle: STFT<f32>,
+    sc_stft_handle: STFT<f32>,
     samples_in_buf: usize,
 }
 
@@ -105,6 +105,7 @@ impl SpecturmSubSystem {
         Self {
             pre_comp_stft_handle: STFT::new(false),
             post_comp_stft_handle: STFT::new(false),
+            sc_stft_handle: STFT::new(false),
             samples_in_buf: 0,
         }
     }
@@ -124,6 +125,8 @@ impl SpecturmSubSystem {
             0,
             NUM_OF_VIZ_FFT_POINTS / 4,
         );
+        self.sc_stft_handle
+            .configure(1, 0, NUM_OF_VIZ_FFT_POINTS, 0, NUM_OF_VIZ_FFT_POINTS / 4);
     }
 }
 
@@ -396,6 +399,7 @@ impl Plugin for OpenMbc {
 
         if self.params.editor_state.is_open() {
             if let Ok(mut uidata) = self.ui_data.try_lock() {
+                //TODO: might skip this as we process all the relevant indecies anyway
                 uidata.set_filter_shape(0.0);
 
                 let mut main_filters = [[Complex64::new(0.0, 0.0); NUM_OF_FILTER_POINTS]; MAX_MBCS];
@@ -414,21 +418,34 @@ impl Plugin for OpenMbc {
 
                             main_filters[idx].copy_from_slice(&main_filter_mag);
 
-                            let filt_plot = uidata.borrow_filter_shape(idx).unwrap();
-
                             // create solo shape
                             let gain = self.params.comps[idx].gain.value();
-
-                            if self.params.solo.value() == idx as i32 {
-                                for i in 0..NUM_OF_FILTER_POINTS {
-                                    filt_plot[i] = main_filter_mag[i].norm()
+                            {
+                                let filt_plot = uidata.borrow_filter_shape(idx).unwrap();
+                                if self.params.solo.value() == idx as i32 {
+                                    for i in 0..NUM_OF_FILTER_POINTS {
+                                        filt_plot[i] = main_filter_mag[i].norm()
+                                    }
+                                } else {
+                                    for i in 0..NUM_OF_FILTER_POINTS {
+                                        filt_plot[i] = (Complex64::ONE - main_filter_mag[i]
+                                            + main_filter_mag[i]
+                                                * (self.params.comps[idx].range.value() * gain)
+                                                    as f64)
+                                            .norm();
+                                    }
                                 }
-                            } else {
+                            }
+
+                            // create no range plot
+                            {
+                                let filt_plot_no_range =
+                                    uidata.borrow_filter_shape(MAX_MBCS + idx).unwrap();
+
                                 for i in 0..NUM_OF_FILTER_POINTS {
-                                    filt_plot[i] = (Complex64::ONE - main_filter_mag[i]
-                                        + main_filter_mag[i]
-                                            * (self.params.comps[idx].range.value() * gain) as f64)
-                                        .norm()
+                                    filt_plot_no_range[i] = (Complex64::ONE - main_filter_mag[i]
+                                        + main_filter_mag[i] * gain as f64)
+                                        .norm();
                                 }
                             }
                         }
@@ -482,6 +499,11 @@ impl Plugin for OpenMbc {
                         .post_comp_stft_handle
                         .process_block_to_spectrum(0);
 
+                    let spectrum_sc = self
+                        .spectrum_handle
+                        .sc_stft_handle
+                        .process_block_to_spectrum(0);
+
                     for i in 0..NUM_OF_VIZ_FFT_POINTS / 2 {
                         uidata.prev_spectrogram_pre[i] = uidata.signal_spectrogram_pre[i];
                         uidata.signal_spectrogram_pre[i] =
@@ -489,6 +511,10 @@ impl Plugin for OpenMbc {
                         uidata.prev_spectrogram_post[i] = uidata.signal_spectrogram_post[i];
                         uidata.signal_spectrogram_post[i] =
                             spectrum_post[i].norm() / (NUM_OF_VIZ_FFT_POINTS / 2) as f32;
+
+                        uidata.prev_spectrogram_sc[i] = uidata.signal_spectrogram_sc[i];
+                        uidata.signal_spectrogram_sc[i] =
+                            spectrum_sc[i].norm() / (NUM_OF_VIZ_FFT_POINTS / 2) as f32;
                     }
 
                     self.spectrum_handle.samples_in_buf = 0;
@@ -504,6 +530,7 @@ impl Plugin for OpenMbc {
 
         let mut buf_pre = [0.0_f32; NUM_OF_VIZ_FFT_POINTS];
         let mut buf_post = [0.0_f32; NUM_OF_VIZ_FFT_POINTS];
+        let mut buf_sc = [0.0_f32; NUM_OF_VIZ_FFT_POINTS];
 
         let mut samples_to_copy = 0;
         for (smp_idx, (mut channel_samples, aux_samples)) in buffer
@@ -580,12 +607,12 @@ impl Plugin for OpenMbc {
                             -gain_to_db_fast(this_comp_params.range.smoothed.next());
                     }
 
-                    //TODO: missing params - knee width, compressor type, filter type
-                    //TODO: missing settings - solo
+                    //TODO: missing params - knee width, compressor type
                 }
 
                 if ch == 0 {
                     buf_pre[smp_idx] = *sample;
+                    buf_sc[smp_idx] = aux_left_right[0];
                     samples_to_copy += 1;
                 }
                 let mut total_crossover = 0.0;
@@ -609,6 +636,7 @@ impl Plugin for OpenMbc {
                                 sc_input[ch] * (1.0 - stereo_mix) + sc_input[1 - ch] * stereo_mix,
                             ),
                         };
+
                         //filter
                         let (filt_main, sc) = comp_filt[ch].filt.process(
                             *sample,
@@ -680,6 +708,13 @@ impl Plugin for OpenMbc {
                     self.spectrum_handle.samples_in_buf,
                     samples_to_copy,
                     &buf_post,
+                );
+
+                self.spectrum_handle.sc_stft_handle.write_input(
+                    0,
+                    self.spectrum_handle.samples_in_buf,
+                    samples_to_copy,
+                    &buf_sc,
                 );
 
                 self.spectrum_handle.samples_in_buf += samples_to_copy;
