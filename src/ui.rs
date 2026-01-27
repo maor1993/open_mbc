@@ -128,8 +128,10 @@ pub struct UiData {
     filter_shapes: Vec<[f64; NUM_OF_FILTER_POINTS]>,
     pub prev_spectrogram_pre: [f32; NUM_OF_VIZ_FFT_POINTS / 2],
     pub prev_spectrogram_post: [f32; NUM_OF_VIZ_FFT_POINTS / 2],
+    pub prev_spectrogram_sc: [f32; NUM_OF_VIZ_FFT_POINTS / 2],
     pub signal_spectrogram_pre: [f32; NUM_OF_VIZ_FFT_POINTS / 2],
     pub signal_spectrogram_post: [f32; NUM_OF_VIZ_FFT_POINTS / 2],
+    pub signal_spectrogram_sc: [f32; NUM_OF_VIZ_FFT_POINTS / 2],
     pub gain_reduction: [f32; MAX_MBCS],
 }
 
@@ -144,8 +146,10 @@ impl Default for UiData {
             filter_shapes: vec![[0.0_f64; NUM_OF_FILTER_POINTS]; (MAX_MBCS * 3) + 1],
             prev_spectrogram_pre: [f32::NEG_INFINITY; NUM_OF_VIZ_FFT_POINTS / 2],
             prev_spectrogram_post: [f32::NEG_INFINITY; NUM_OF_VIZ_FFT_POINTS / 2],
+            prev_spectrogram_sc: [f32::NEG_INFINITY; NUM_OF_VIZ_FFT_POINTS / 2],
             signal_spectrogram_pre: [f32::NEG_INFINITY; NUM_OF_VIZ_FFT_POINTS / 2],
             signal_spectrogram_post: [f32::NEG_INFINITY; NUM_OF_VIZ_FFT_POINTS / 2],
+            signal_spectrogram_sc: [f32::NEG_INFINITY; NUM_OF_VIZ_FFT_POINTS / 2],
             gain_reduction: [0.0_f32; MAX_MBCS],
         }
     }
@@ -649,7 +653,7 @@ pub fn build_editor(
                                     });
                                 fft_freqs[0] = 1.0;
 
-                                const SPECTROGRAM_ALPHA: f32 = 0.6;
+                                const SPECTROGRAM_ALPHA: f32 = 0.2;
                                 const INTERPOLATION_SIZE: usize = 4;
 
                                 let xs_post_inter: [f64; NUM_OF_VIZ_FFT_POINTS
@@ -714,21 +718,59 @@ pub fn build_editor(
                                     })
                                     .collect();
 
+                                let points_sc_pre_inter = splines::Spline::from_vec(
+                                    (0..NUM_OF_VIZ_FFT_POINTS / 2)
+                                        .map(|i| {
+                                            let x = fft_freqs[i];
+                                            let y = nih_plug::util::gain_to_db_fast(
+                                                uidata.prev_spectrogram_sc[i] * SPECTROGRAM_ALPHA
+                                                    + (1.0 - SPECTROGRAM_ALPHA)
+                                                        * uidata.signal_spectrogram_sc[i],
+                                            )
+                                                as f64;
+
+                                            Key::new(x, y, splines::Interpolation::Cosine)
+                                        })
+                                        .collect(),
+                                );
+
+                                let points_sc: egui_plot::PlotPoints =
+                                    (0..NUM_OF_VIZ_FFT_POINTS * INTERPOLATION_SIZE / 2)
+                                        .map(|i| {
+                                            let x = xs_post_inter[i];
+                                            let y = points_sc_pre_inter.clamped_sample(x).unwrap();
+
+                                            [x, y]
+                                        })
+                                        .collect();
+
                                 let line = egui_plot::Line::new("stft_pre", points_pre)
                                     .color(egui::Color32::from_rgb(100, 100, 100))
                                     .width(1.0)
                                     .fill_alpha(0.1)
                                     .fill(MIN_POWER_DB as f32);
                                 plot_ui.line(line);
-                                // plot_ui.add(spectrogram_area_pre);
 
                                 let line = egui_plot::Line::new("stft_post", points_post)
                                     .color(egui::Color32::from_rgb(80, 80, 80))
                                     .width(0.8)
                                     .fill_alpha(0.3)
                                     .fill(MIN_POWER_DB as f32);
-
                                 plot_ui.line(line);
+
+                                let sc_enabled = (0..MAX_MBCS)
+                                    .into_iter()
+                                    .map(|i| params.comps[i].sidechain.value())
+                                    .any(|x| x);
+
+                                let line = egui_plot::Line::new("stft_sc", points_sc)
+                                    .color(egui::Color32::from_rgb(200, 0, 0))
+                                    .width(0.7)
+                                    .fill_alpha(0.1)
+                                    .fill(MIN_POWER_DB as f32);
+                                if sc_enabled {
+                                    plot_ui.line(line);
+                                }
                             }
 
                             for i in 0..MAX_MBCS {

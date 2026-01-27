@@ -96,6 +96,7 @@ struct CompParams {
 struct SpecturmSubSystem {
     pre_comp_stft_handle: STFT<f32>,
     post_comp_stft_handle: STFT<f32>,
+    sc_stft_handle: STFT<f32>,
     samples_in_buf: usize,
 }
 
@@ -104,6 +105,7 @@ impl SpecturmSubSystem {
         Self {
             pre_comp_stft_handle: STFT::new(false),
             post_comp_stft_handle: STFT::new(false),
+            sc_stft_handle: STFT::new(false),
             samples_in_buf: 0,
         }
     }
@@ -123,6 +125,8 @@ impl SpecturmSubSystem {
             0,
             NUM_OF_VIZ_FFT_POINTS / 4,
         );
+        self.sc_stft_handle
+            .configure(1, 0, NUM_OF_VIZ_FFT_POINTS, 0, NUM_OF_VIZ_FFT_POINTS / 4);
     }
 }
 
@@ -495,6 +499,11 @@ impl Plugin for OpenMbc {
                         .post_comp_stft_handle
                         .process_block_to_spectrum(0);
 
+                    let spectrum_sc = self
+                        .spectrum_handle
+                        .sc_stft_handle
+                        .process_block_to_spectrum(0);
+
                     for i in 0..NUM_OF_VIZ_FFT_POINTS / 2 {
                         uidata.prev_spectrogram_pre[i] = uidata.signal_spectrogram_pre[i];
                         uidata.signal_spectrogram_pre[i] =
@@ -502,6 +511,10 @@ impl Plugin for OpenMbc {
                         uidata.prev_spectrogram_post[i] = uidata.signal_spectrogram_post[i];
                         uidata.signal_spectrogram_post[i] =
                             spectrum_post[i].norm() / (NUM_OF_VIZ_FFT_POINTS / 2) as f32;
+
+                        uidata.prev_spectrogram_sc[i] = uidata.signal_spectrogram_sc[i];
+                        uidata.signal_spectrogram_sc[i] =
+                            spectrum_sc[i].norm() / (NUM_OF_VIZ_FFT_POINTS / 2) as f32;
                     }
 
                     self.spectrum_handle.samples_in_buf = 0;
@@ -517,6 +530,7 @@ impl Plugin for OpenMbc {
 
         let mut buf_pre = [0.0_f32; NUM_OF_VIZ_FFT_POINTS];
         let mut buf_post = [0.0_f32; NUM_OF_VIZ_FFT_POINTS];
+        let mut buf_sc = [0.0_f32; NUM_OF_VIZ_FFT_POINTS];
 
         let mut samples_to_copy = 0;
         for (smp_idx, (mut channel_samples, aux_samples)) in buffer
@@ -593,12 +607,12 @@ impl Plugin for OpenMbc {
                             -gain_to_db_fast(this_comp_params.range.smoothed.next());
                     }
 
-                    //TODO: missing params - knee width, compressor type, filter type
-                    //TODO: missing settings - solo
+                    //TODO: missing params - knee width, compressor type
                 }
 
                 if ch == 0 {
                     buf_pre[smp_idx] = *sample;
+                    buf_sc[smp_idx] = aux_left_right[0];
                     samples_to_copy += 1;
                 }
                 let mut total_crossover = 0.0;
@@ -622,6 +636,7 @@ impl Plugin for OpenMbc {
                                 sc_input[ch] * (1.0 - stereo_mix) + sc_input[1 - ch] * stereo_mix,
                             ),
                         };
+
                         //filter
                         let (filt_main, sc) = comp_filt[ch].filt.process(
                             *sample,
@@ -693,6 +708,13 @@ impl Plugin for OpenMbc {
                     self.spectrum_handle.samples_in_buf,
                     samples_to_copy,
                     &buf_post,
+                );
+
+                self.spectrum_handle.sc_stft_handle.write_input(
+                    0,
+                    self.spectrum_handle.samples_in_buf,
+                    samples_to_copy,
+                    &buf_sc,
                 );
 
                 self.spectrum_handle.samples_in_buf += samples_to_copy;
