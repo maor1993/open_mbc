@@ -649,21 +649,18 @@ pub fn build_editor(
                                     });
                                 fft_freqs[0] = 1.0;
 
-                                // let points_pre: egui_plot::PlotPoints = (0
-                                //     ..NUM_OF_VIZ_FFT_POINTS / 2)
-                                //     .map(|i| {
-                                //         let x = fft_freqs[i];
-                                //         let y = nih_plug::util::gain_to_db_fast(
-                                //             uidata.signal_spectrogram_pre[i],
-                                //         );
-
-                                //         [x, y as f64]
-                                //     })
-                                //     .collect();
-                                const SPECTROGRAM_ALPHA: f32 = 0.85;
+                                const SPECTROGRAM_ALPHA: f32 = 0.6;
                                 const INTERPOLATION_SIZE: usize = 4;
 
-                                let points_pre = splines::Spline::from_vec(
+                                let xs_post_inter: [f64; NUM_OF_VIZ_FFT_POINTS
+                                    * INTERPOLATION_SIZE
+                                    / 2] = std::array::from_fn(|i| {
+                                    (uidata.sample_rate as f64 * i as f64
+                                        / ((NUM_OF_VIZ_FFT_POINTS * INTERPOLATION_SIZE) as f64))
+                                        .log10()
+                                });
+
+                                let points_pre_pre_inter = splines::Spline::from_vec(
                                     (0..NUM_OF_VIZ_FFT_POINTS / 2)
                                         .map(|i| {
                                             let x = fft_freqs[i];
@@ -682,18 +679,15 @@ pub fn build_editor(
                                 let points_pre: egui_plot::PlotPoints =
                                     (0..(NUM_OF_VIZ_FFT_POINTS * INTERPOLATION_SIZE / 2))
                                         .map(|i| {
-                                            let x = (uidata.sample_rate as f64 * i as f64
-                                                / ((NUM_OF_VIZ_FFT_POINTS * INTERPOLATION_SIZE)
-                                                    as f64))
-                                                .log10();
+                                            let x = xs_post_inter[i];
 
-                                            let y = points_pre.clamped_sample(x).unwrap();
+                                            let y = points_pre_pre_inter.clamped_sample(x).unwrap();
 
                                             [x, y]
                                         })
                                         .collect();
 
-                                let points_post = splines::Spline::from_vec(
+                                let points_post_pre_inter = splines::Spline::from_vec(
                                     (0..NUM_OF_VIZ_FFT_POINTS / 2)
                                         .map(|i| {
                                             let x = fft_freqs[i];
@@ -709,31 +703,31 @@ pub fn build_editor(
                                         .collect(),
                                 );
 
-                                let points_post: egui_plot::PlotPoints =
-                                    (0..NUM_OF_VIZ_FFT_POINTS * INTERPOLATION_SIZE / 2)
-                                        .map(|i| {
-                                            let x = (uidata.sample_rate as f64 * i as f64
-                                                / ((NUM_OF_VIZ_FFT_POINTS * INTERPOLATION_SIZE)
-                                                    as f64))
-                                                .log10();
-                                            let y = points_post.clamped_sample(x).unwrap();
+                                let points_post: egui_plot::PlotPoints = (0..NUM_OF_VIZ_FFT_POINTS
+                                    * INTERPOLATION_SIZE
+                                    / 2)
+                                    .map(|i| {
+                                        let x = xs_post_inter[i];
+                                        let y = points_post_pre_inter.clamped_sample(x).unwrap();
 
-                                            [x, y]
-                                        })
-                                        .collect();
+                                        [x, y]
+                                    })
+                                    .collect();
 
                                 let line = egui_plot::Line::new("stft_pre", points_pre)
-                                    .color(egui::Color32::from_rgb(200, 200, 200))
-                                    .width(2.0)
-                                    // .fill(MIN_POWER_DB as f32)
-                                    .fill_alpha(0.8);
+                                    .color(egui::Color32::from_rgb(100, 100, 100))
+                                    .width(1.0)
+                                    .fill_alpha(0.1)
+                                    .fill(MIN_POWER_DB as f32);
                                 plot_ui.line(line);
+                                // plot_ui.add(spectrogram_area_pre);
 
                                 let line = egui_plot::Line::new("stft_post", points_post)
-                                    .color(egui::Color32::from_rgb(200, 10, 20))
-                                    .width(1.0)
-                                    // .fill(MIN_POWER_DB as f32)
-                                    .fill_alpha(0.8);
+                                    .color(egui::Color32::from_rgb(80, 80, 80))
+                                    .width(0.8)
+                                    .fill_alpha(0.3)
+                                    .fill(MIN_POWER_DB as f32);
+
                                 plot_ui.line(line);
                             }
 
