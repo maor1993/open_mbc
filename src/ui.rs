@@ -4,14 +4,13 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-
 use splines::{self, Key};
 
 use nih_plug::{
     editor::Editor,
-    // log::info,
+    params::Param,
     prelude::{AtomicF32, ParamSetter},
-    util::{gain_to_db_fast},
+    util::gain_to_db_fast,
 };
 use nih_plug_egui::{
     create_egui_editor,
@@ -847,6 +846,75 @@ pub fn build_editor(
                                                         setter,
                                                         &params.comps[idx].center_freq,
                                                         10.0_f32.powf(mouse_pos.x as f32).round()
+                                                    );
+
+                                                    update_param!(
+                                                        setter,
+                                                        &params.comps[idx].attack,
+                                                        params.comps[idx]
+                                                            .attack
+                                                            .default_plain_value()
+                                                    );
+                                                    update_param!(
+                                                        setter,
+                                                        &params.comps[idx].gain,
+                                                        params.comps[idx]
+                                                            .gain
+                                                            .default_plain_value()
+                                                    );
+                                                    update_param!(
+                                                        setter,
+                                                        &params.comps[idx].release,
+                                                        params.comps[idx]
+                                                            .release
+                                                            .default_plain_value()
+                                                    );
+                                                    update_param!(
+                                                        setter,
+                                                        &params.comps[idx].q,
+                                                        params.comps[idx].q.default_plain_value()
+                                                    );
+                                                    update_param!(
+                                                        setter,
+                                                        &params.comps[idx].filtertype,
+                                                        params.comps[idx]
+                                                            .filtertype
+                                                            .default_plain_value()
+                                                    );
+                                                    update_param!(
+                                                        setter,
+                                                        &params.comps[idx].range,
+                                                        params.comps[idx]
+                                                            .range
+                                                            .default_plain_value()
+                                                    );
+                                                    update_param!(
+                                                        setter,
+                                                        &params.comps[idx].sidechain,
+                                                        params.comps[idx]
+                                                            .sidechain
+                                                            .default_plain_value()
+                                                    );
+                                                    update_param!(
+                                                        setter,
+                                                        &params.comps[idx].slope,
+                                                        params.comps[idx]
+                                                            .slope
+                                                            .default_plain_value()
+                                                    );
+                                                    update_param!(
+                                                        setter,
+                                                        &params.comps[idx].threshold,
+                                                        params.comps[idx]
+                                                            .threshold
+                                                            .default_plain_value()
+                                                    );
+                                                    update_param!(
+                                                        setter,
+                                                        &params.comps[idx].ratio,
+                                                        params.comps[idx]
+                                                            .ratio
+                                                            .default_plain_value()
                                                     );
 
                                                     uidata.curr_mbc_idx = idx;
