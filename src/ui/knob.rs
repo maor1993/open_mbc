@@ -45,8 +45,9 @@ pub fn build_knob(
     let resp = ui.add(knob);
 
     if !index_changed {
-        egui::Popup::menu(&resp)
-            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        let resp = egui::Popup::menu(&resp)
+            .id(format!("value_popup_{}", name).into())
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
             .show(|ui| {
                 let resp = ui.add(
                     egui::widgets::DragValue::new(&mut val)
@@ -55,6 +56,12 @@ pub fn build_knob(
                 );
                 resp.request_focus();
             });
+
+        if let Some(_) = resp {
+            if ui.ctx().input(|i| i.key_pressed(egui::Key::Enter)) {
+                egui::containers::Popup::close_id(ui.ctx(), format!("value_popup_{}", name).into());
+            }
+        }
     }
 
     if is_db {
