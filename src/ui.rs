@@ -2,6 +2,7 @@ use egui_plot::Plot;
 use std::{
     f32, f64,
     sync::{Arc, Mutex},
+    collections::VecDeque
 };
 
 use splines::{self, Key};
@@ -123,6 +124,7 @@ pub struct UiData {
     is_dragging: bool,
     curr_mbc_idx: usize,
     prev_mbc_idx: usize,
+    scale_req_queue: VecDeque<f32>,
     gui_scale: f32,
     pub sample_rate: f32,
     filter_shapes: Vec<[f64; NUM_OF_FILTER_POINTS]>,
@@ -141,8 +143,9 @@ impl Default for UiData {
             is_dragging: false,
             curr_mbc_idx: 0,
             prev_mbc_idx: 0,
+            scale_req_queue: VecDeque::with_capacity(10),
             sample_rate: 0.0,
-            gui_scale: 1.0,
+            gui_scale: 0.0,
             filter_shapes: vec![[0.0_f64; NUM_OF_FILTER_POINTS]; (MAX_MBCS * 3) + 1],
             prev_spectrogram_pre: [f32::NEG_INFINITY; NUM_OF_VIZ_FFT_POINTS / 2],
             prev_spectrogram_post: [f32::NEG_INFINITY; NUM_OF_VIZ_FFT_POINTS / 2],
@@ -359,13 +362,13 @@ fn create_state_tooltip(
     ui_data.lock().unwrap().prev_mbc_idx = curr_idx;
 }
 
-const BASELINE_SIZE: Vec2 = Vec2::new(640.0, 480.0);
+const BASELINE_SIZE: Vec2 = Vec2::new(960.0, 480.0);
 
 fn panel_baseline<R>(
     id: &str,
     context: &egui::Context,
     egui_state: &EguiState,
-    scale: f32,
+    scale: Option<f32>,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<R> {
     egui::CentralPanel::default().show(context, move |ui| {
@@ -379,7 +382,8 @@ fn panel_baseline<R>(
 
         let ret = add_contents(&mut content_ui);
 
-        if egui_state.size().0 != (BASELINE_SIZE.x * scale).round() as u32 {
+
+        if let Some(scale) = scale{
             egui_state.set_requested_size((
                 (BASELINE_SIZE.x * scale).round() as u32,
                 (BASELINE_SIZE.y * scale).round() as u32,
@@ -403,7 +407,7 @@ pub fn build_editor(
         |_, _, _| {},
         move |egui_ctx, setter, _queue, _state| {
             egui_extras::install_image_loaders(egui_ctx);
-            let next_gui_scale = ui_data.lock().unwrap().gui_scale;
+            let next_gui_scale = ui_data.lock().unwrap().scale_req_queue.pop_front();
 
             panel_baseline(
                 "main",
@@ -1049,7 +1053,12 @@ pub fn build_editor(
                         update_param!(setter, &params.stereo_mix, stereo_mix);
                         {
                             let mut uidata = ui_data.lock().unwrap();
-                            // let lastscale = uidata.gui_scale;
+
+                            let lastscale = uidata.gui_scale;
+                            //handle boot case 
+                            if uidata.gui_scale == 0.0{
+                                uidata.gui_scale = 1.0;
+                            }
                             egui::containers::ComboBox::from_label("Gui Scale")
                                 .selected_text(format!("{:.0}%", 100.0 * uidata.gui_scale))
                                 .show_ui(ui, |ui| {
@@ -1058,6 +1067,13 @@ pub fn build_editor(
                                     ui.selectable_value(&mut uidata.gui_scale, 1.5, "150%");
                                     ui.selectable_value(&mut uidata.gui_scale, 2.0, "200%");
                                 });
+                            if lastscale != uidata.gui_scale{
+                                // kombina, push 5 scale requests because... reasons.
+                                let scale = uidata.gui_scale;
+                                for _ in 0..5{
+                                    uidata.scale_req_queue.push_back(scale);
+                                }
+                            }
                         }
                     })
                 },
