@@ -38,6 +38,9 @@ You can set:
 * Compression Ratio
 * Attack
 * Release
+* Filter type (bandpass, low/high shelf)
+* Filter Intensity (12/24/36/48dB slope)
+
 
 Clicking again on the line will create an additional compressor band
 ![Second Click](docs/second_click.png)
@@ -49,6 +52,12 @@ Clicking on the previous band will change back to the bands settings
 **Note - The current maximum bands you can set is 5**
 
 
+### Modifying settings
+
+* you can click each knob to manually set the value 
+* you can double click a knob to reset the knob to the default value
+* you can drag the filter on the graph to see the coresspoing musical note
+
 ### Visuals 
 there are 3 main visuals you get with Open MBC
 
@@ -56,7 +65,7 @@ there are 3 main visuals you get with Open MBC
 
 
 #### Spectrum
-The spectrum line shows the input signal spectrum in **White** , and the output spectrum in **Red**
+The spectrum line shows the input signal spectrum in **White** , and the output spectrum in **Dark Gray**
 
 #### Gain Graph
 The main line where you place your bands will show you the current compression being performed on the spectrum
@@ -78,6 +87,8 @@ you'll need to enable the second stereo pair in your DAW and send it your
 * you can choose if the plugin should process using mid-side by clicking the button on the bottom left
 
 * the compression for stereo signals is measued with the average of the two channels, you can control this blend by setting the stereo mix %, also on the bottom left.
+
+* you can click **solo** on one of the bands to hear what the compressor is hearing
 
 
 ## Building
