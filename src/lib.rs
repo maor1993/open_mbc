@@ -357,6 +357,8 @@ impl Plugin for OpenMbc {
         }
         self.spectrum_handle.configure();
 
+        //Note that this section also handles restoration of parameters when project is loaded, 
+        //as such, we will take the values provided by tool.
         for (idx, cf_channel) in self.comp_filt_state.iter_mut().enumerate() {
             for comp_filt in cf_channel.iter_mut() {
                 comp_filt.filt.sample_rate = self.sample_rate;
@@ -366,10 +368,13 @@ impl Plugin for OpenMbc {
                 comp_filt.filt.configure();
 
                 comp_filt.comp.update_sample_rate(self.sample_rate);
-                //TODO: might need to remove this as this will destroy user settings if sample rate is updated
-                comp_filt.comp.solver.update_attack(5.0);
-                comp_filt.comp.solver.update_release(100.0);
-                comp_filt.comp.solver.update_ratio(4.0);
+
+                comp_filt.comp.solver.threshold = gain_to_db_fast(self.params.comps[idx].threshold.value());
+                comp_filt.comp.max_reduciton = -gain_to_db_fast(self.params.comps[idx].ratio.value());
+      
+                comp_filt.comp.solver.update_attack(self.params.comps[idx].attack.value());
+                comp_filt.comp.solver.update_release(self.params.comps[idx].release.value());
+                comp_filt.comp.solver.update_ratio(self.params.comps[idx].ratio.value());
             }
         }
 
