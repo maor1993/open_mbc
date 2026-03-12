@@ -370,7 +370,7 @@ impl Plugin for OpenMbc {
                 comp_filt.comp.update_sample_rate(self.sample_rate);
 
                 comp_filt.comp.solver.threshold = gain_to_db_fast(self.params.comps[idx].threshold.value());
-                comp_filt.comp.max_reduciton = -gain_to_db_fast(self.params.comps[idx].ratio.value());
+                comp_filt.comp.max_reduciton = -gain_to_db_fast(self.params.comps[idx].range.value());
       
                 comp_filt.comp.solver.update_attack(self.params.comps[idx].attack.value());
                 comp_filt.comp.solver.update_release(self.params.comps[idx].release.value());
