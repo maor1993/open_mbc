@@ -5,7 +5,7 @@ use nih_plug::{
     prelude::ParamSetter,
     util::{db_to_gain_fast, gain_to_db_fast},
 };
-use nih_plug_egui::egui;
+use egui;
 
 pub type Format = Option<fn(f32) -> String>;
 

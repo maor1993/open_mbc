@@ -1,4 +1,4 @@
-use nih_plug_egui::egui::{self, Color32, Rect, Response, Sense, Ui, Vec2, Widget};
+use egui::{self, Color32, Rect, Response, Sense, Ui, Vec2, Widget};
 
 pub struct VolumeMeter<'a> {
     value: &'a f32,

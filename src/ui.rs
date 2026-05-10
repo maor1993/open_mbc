@@ -1,23 +1,20 @@
 use egui_plot::Plot;
 use std::{
+    collections::VecDeque,
     f32, f64,
     sync::{Arc, Mutex},
-    collections::VecDeque
 };
 
 use splines::{self, Key};
 
+use egui::{self, widgets::ProgressBar, Color32, FontId, RichText, Vec2};
 use nih_plug::{
     editor::Editor,
     params::Param,
     prelude::{AtomicF32, ParamSetter},
     util::gain_to_db_fast,
 };
-use nih_plug_egui::{
-    create_egui_editor,
-    egui::{self, widgets::ProgressBar, Color32, FontId, RichText, Vec2},
-    EguiState,
-};
+use nih_plug_egui::{create_egui_editor, EguiState};
 
 use pitchy;
 
@@ -366,12 +363,12 @@ const BASELINE_SIZE: Vec2 = Vec2::new(960.0, 480.0);
 
 fn panel_baseline<R>(
     id: &str,
-    context: &egui::Context,
+    context: &mut egui::Ui,
     egui_state: &EguiState,
     scale: Option<f32>,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<R> {
-    egui::CentralPanel::default().show(context, move |ui| {
+    egui::CentralPanel::default().show_inside(context, move |ui| {
         let _ = egui::Id::new(id);
         let ui_rect = ui.clip_rect();
         let mut content_ui = ui.new_child(
@@ -382,8 +379,7 @@ fn panel_baseline<R>(
 
         let ret = add_contents(&mut content_ui);
 
-
-        if let Some(scale) = scale{
+        if let Some(scale) = scale {
             egui_state.set_requested_size((
                 (BASELINE_SIZE.x * scale).round() as u32,
                 (BASELINE_SIZE.y * scale).round() as u32,
@@ -405,7 +401,7 @@ pub fn build_editor(
         (),
         Default::default(),
         |_, _, _| {},
-        move |egui_ctx, setter, _queue, _state| {
+        move |egui_ctx, setter, win_req_queue, _state| {
             egui_extras::install_image_loaders(egui_ctx);
             let next_gui_scale = ui_data.lock().unwrap().scale_req_queue.pop_front();
 
@@ -1055,8 +1051,8 @@ pub fn build_editor(
                             let mut uidata = ui_data.lock().unwrap();
 
                             let lastscale = uidata.gui_scale;
-                            //handle boot case 
-                            if uidata.gui_scale == 0.0{
+                            //handle boot case
+                            if uidata.gui_scale == 0.0 {
                                 uidata.gui_scale = 1.0;
                             }
                             egui::containers::ComboBox::from_label("Gui Scale")
@@ -1067,10 +1063,10 @@ pub fn build_editor(
                                     ui.selectable_value(&mut uidata.gui_scale, 1.5, "150%");
                                     ui.selectable_value(&mut uidata.gui_scale, 2.0, "200%");
                                 });
-                            if lastscale != uidata.gui_scale{
+                            if lastscale != uidata.gui_scale {
                                 // kombina, push 5 scale requests because... reasons.
                                 let scale = uidata.gui_scale;
-                                for _ in 0..5{
+                                for _ in 0..5 {
                                     uidata.scale_req_queue.push_back(scale);
                                 }
                             }

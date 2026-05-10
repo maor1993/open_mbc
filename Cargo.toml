@@ -18,21 +18,22 @@ anyhow = "1.0.100"
 vergen-git2 = { version = "1.0.7", features = ["build", "cargo", "rustc", "si"] }
 
 [dependencies]
-nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev="28b149ec4d62757d0b448809148a0c3ca6e09a95", features = [
+nih_plug = { git = "https://codeberg.org/maor1993/nih-plug.git", features = [
     "assert_process_allocs",
     "standalone"
 ] }
-nih_plug_egui = { git = "https://codeberg.org/maor1993/egui-baseview.git", branch = "main" ,features = ["keyboard_focus_workaround"]}
+nih_plug_egui = { git = "https://codeberg.org/maor1993/nih-plug.git"}
 cute-dsp = { git = "https://github.com/maor1993/RSCuteDSP.git", features = ["std"] }
 crossbeam = "0.8.4"
 anyhow = "1.0.100"
 
 egui_plot = {git="https://github.com/emilk/egui_plot.git"}
 num-complex = "0.4.6"
-egui_knob = "0.3.9"
+egui_knob = "0.3.14"
 splines = "5.0.0"
-egui_extras = { version = "0.33.3", features = ["svg"] }
+egui_extras = { version = "0.34.2", features = ["svg"] }
 pitchy = "0.2.0"
+egui = "0.34.2"
 
 [dev-dependencies]
 plotters = {version = "0.3.7"}
