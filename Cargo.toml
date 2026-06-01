@@ -18,11 +18,11 @@ anyhow = "1.0.100"
 vergen-git2 = { version = "1.0.7", features = ["build", "cargo", "rustc", "si"] }
 
 [dependencies]
-nih_plug = { git = "https://codeberg.org/maor1993/nih-plug.git", features = [
+nice-plug = { git = "https://codeberg.org/RustAudio/nice-plug.git", features = [
     "assert_process_allocs",
     "standalone"
 ] }
-nih_plug_egui = { git = "https://codeberg.org/maor1993/nih-plug.git"}
+nice-plug-egui = { git = "https://codeberg.org/RustAudio/nice-plug.git"}
 cute-dsp = { git = "https://github.com/maor1993/RSCuteDSP.git", features = ["std"] }
 crossbeam = "0.8.4"
 anyhow = "1.0.100"

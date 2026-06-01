@@ -1,5 +1,5 @@
-use nih_plug::prelude::*;
-use nih_plug::util::gain_to_db_fast;
+use nice_plug::prelude::*;
+use nice_plug::util::gain_to_db_fast;
 use num_complex::Complex64;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -16,7 +16,7 @@ use ui::build_editor;
 use ui::PeakMeter;
 use ui::UiData;
 
-use nih_plug_egui::EguiState;
+use nice_plug_egui::EguiState;
 
 use cute_dsp::stft::STFT;
 
@@ -464,7 +464,7 @@ impl Plugin for OpenMbc {
                         //TODO: all of these enables should be downstreamed to the struct and read from there.
                         if self.params.comps[idx].enable.value() {
                             let gain = self.params.comps[idx].gain.value() as f64;
-                            let comp_as_gain = nih_plug::util::db_to_gain_fast(
+                            let comp_as_gain = nice_plug::util::db_to_gain_fast(
                                 -comp_filt[0].comp.curr_reduction_post_model,
                             ) as f64;
 
@@ -738,4 +738,4 @@ impl Vst3Plugin for OpenMbc {
         &[Vst3SubCategory::Fx, Vst3SubCategory::Dynamics];
 }
 
-nih_export_vst3!(OpenMbc);
+nice_export_vst3!(OpenMbc);

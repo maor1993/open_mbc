@@ -1,6 +1,6 @@
 use super::utils::update_param;
 use egui_knob::Knob;
-use nih_plug::{
+use nice_plug::{
     params::{FloatParam, Param},
     prelude::ParamSetter,
     util::{db_to_gain_fast, gain_to_db_fast},
@@ -22,8 +22,8 @@ pub fn build_knob(
     let mut val = param.value();
 
     let mut limits = match param.range() {
-        nih_plug::prelude::FloatRange::Linear { min, max } => (min, max),
-        nih_plug::prelude::FloatRange::Skewed { min, max, .. } => (min, max),
+        nice_plug::prelude::FloatRange::Linear { min, max } => (min, max),
+        nice_plug::prelude::FloatRange::Skewed { min, max, .. } => (min, max),
         _ => unreachable!(),
     };
 

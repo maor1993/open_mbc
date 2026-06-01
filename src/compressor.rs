@@ -1,4 +1,4 @@
-use nih_plug::prelude::*;
+use nice_plug::prelude::*;
 
 mod models;
 mod process;
@@ -153,14 +153,14 @@ mod tests {
             chart.draw_series(LineSeries::new(
                 self.samples
                     .iter()
-                    .map(|x| (x.idx as f32, nih_plug::util::gain_to_db(x.input.abs()))),
+                    .map(|x| (x.idx as f32, nice_plug::util::gain_to_db(x.input.abs()))),
                 &RED,
             ))?;
 
             chart.draw_series(LineSeries::new(
                 self.samples
                     .iter()
-                    .map(|x| (x.idx as f32, nih_plug::util::gain_to_db(x.output.abs()))),
+                    .map(|x| (x.idx as f32, nice_plug::util::gain_to_db(x.output.abs()))),
                 &BLUE,
             ))?;
 

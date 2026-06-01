@@ -8,13 +8,13 @@ use std::{
 use splines::{self, Key};
 
 use egui::{self, widgets::ProgressBar, Color32, FontId, RichText, Vec2};
-use nih_plug::{
+use nice_plug::{
     editor::Editor,
     params::Param,
     prelude::{AtomicF32, ParamSetter},
     util::gain_to_db_fast,
 };
-use nih_plug_egui::{create_egui_editor, EguiState};
+use nice_plug_egui::{baseview::PhySize, create_egui_editor, EguiState};
 
 use pitchy;
 
@@ -455,11 +455,11 @@ pub fn build_editor(
                             peak_meter_val[1].load(std::sync::atomic::Ordering::Relaxed),
                         );
                         ui.add(
-                            VolumeMeter::new(&sig0, nih_plug::util::MINUS_INFINITY_DB, 6.0)
+                            VolumeMeter::new(&sig0, nice_plug::util::MINUS_INFINITY_DB, 6.0)
                                 .width(15.0),
                         );
                         ui.add(
-                            VolumeMeter::new(&sig1, nih_plug::util::MINUS_INFINITY_DB, 6.0)
+                            VolumeMeter::new(&sig1, nice_plug::util::MINUS_INFINITY_DB, 6.0)
                                 .width(15.0),
                         );
 
@@ -583,7 +583,7 @@ pub fn build_editor(
                                     let freq_bins = get_frequencies_log10();
                                     let filter_shape_db: [f64; NUM_OF_FILTER_POINTS] =
                                         std::array::from_fn(|i| {
-                                            nih_plug::util::gain_to_db_fast(filter_shape[i] as f32)
+                                            nice_plug::util::gain_to_db_fast(filter_shape[i] as f32)
                                                 as f64
                                         });
 
@@ -608,7 +608,7 @@ pub fn build_editor(
                                     if (0..MAX_MBCS).contains(&filter_idx) {
                                         let main_line_shape_db: [f64; NUM_OF_FILTER_POINTS] =
                                             std::array::from_fn(|i| {
-                                                nih_plug::util::gain_to_db_fast(
+                                                nice_plug::util::gain_to_db_fast(
                                                     uidata.filter_shapes[MAX_MBCS + filter_idx][i]
                                                         as f32,
                                                 )
@@ -668,7 +668,7 @@ pub fn build_editor(
                                     (0..NUM_OF_VIZ_FFT_POINTS / 2)
                                         .map(|i| {
                                             let x = fft_freqs[i];
-                                            let y = nih_plug::util::gain_to_db_fast(
+                                            let y = nice_plug::util::gain_to_db_fast(
                                                 uidata.prev_spectrogram_pre[i] * SPECTROGRAM_ALPHA
                                                     + (1.0 - SPECTROGRAM_ALPHA)
                                                         * uidata.signal_spectrogram_pre[i],
@@ -695,7 +695,7 @@ pub fn build_editor(
                                     (0..NUM_OF_VIZ_FFT_POINTS / 2)
                                         .map(|i| {
                                             let x = fft_freqs[i];
-                                            let y = nih_plug::util::gain_to_db_fast(
+                                            let y = nice_plug::util::gain_to_db_fast(
                                                 uidata.prev_spectrogram_post[i] * SPECTROGRAM_ALPHA
                                                     + (1.0 - SPECTROGRAM_ALPHA)
                                                         * uidata.signal_spectrogram_post[i],
@@ -722,7 +722,7 @@ pub fn build_editor(
                                     (0..NUM_OF_VIZ_FFT_POINTS / 2)
                                         .map(|i| {
                                             let x = fft_freqs[i];
-                                            let y = nih_plug::util::gain_to_db_fast(
+                                            let y = nice_plug::util::gain_to_db_fast(
                                                 uidata.prev_spectrogram_sc[i] * SPECTROGRAM_ALPHA
                                                     + (1.0 - SPECTROGRAM_ALPHA)
                                                         * uidata.signal_spectrogram_sc[i],
@@ -777,7 +777,7 @@ pub fn build_editor(
                                 if params.comps[i].enable.value() {
                                     let pnt = [
                                         params.comps[i].center_freq.value().log10() as f64,
-                                        nih_plug::util::gain_to_db_fast(
+                                        nice_plug::util::gain_to_db_fast(
                                             params.comps[i].gain.value(),
                                         ) as f64,
                                     ];

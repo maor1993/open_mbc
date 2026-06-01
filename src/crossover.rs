@@ -1,5 +1,5 @@
 use cute_dsp::filters::Biquad;
-use nih_plug::prelude::Enum;
+use nice_plug::prelude::Enum;
 use num_complex::Complex64;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Enum)]
