@@ -265,7 +265,7 @@ impl Default for OpenMbc {
 impl Default for OpenMbcParams {
     fn default() -> Self {
         Self {
-            editor_state: EguiState::from_size(1024, 640),
+            editor_state: EguiState::from_size(nice_plug::editor::dpi::LogicalSize { width: 1024.0, height: 640.0 }),
 
             comps: std::array::from_fn(|_| CompParams::default()),
             solo: IntParam::new(

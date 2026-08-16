@@ -14,7 +14,7 @@ use nice_plug::{
     prelude::{AtomicF32, ParamSetter},
     util::gain_to_db_fast,
 };
-use nice_plug_egui::{baseview::PhySize, create_egui_editor, EguiState};
+use nice_plug_egui::{create_egui_editor, EguiState};
 
 use pitchy;
 
@@ -368,7 +368,7 @@ fn panel_baseline<R>(
     scale: Option<f32>,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<R> {
-    egui::CentralPanel::default().show_inside(context, move |ui| {
+    egui::CentralPanel::default().show(context, move |ui| {
         let _ = egui::Id::new(id);
         let ui_rect = ui.clip_rect();
         let mut content_ui = ui.new_child(
@@ -379,12 +379,12 @@ fn panel_baseline<R>(
 
         let ret = add_contents(&mut content_ui);
 
-        if let Some(scale) = scale {
-            egui_state.set_requested_size((
-                (BASELINE_SIZE.x * scale).round() as u32,
-                (BASELINE_SIZE.y * scale).round() as u32,
-            ));
-        }
+        // if let Some(scale) = scale {
+        //     egui_state.set_requested_size((
+        //         (BASELINE_SIZE.x * scale).round() as u32,
+        //         (BASELINE_SIZE.y * scale).round() as u32,
+        //     ));
+        // }
 
         ret
     })
@@ -396,6 +396,8 @@ pub fn build_editor(
     ui_data: Arc<Mutex<UiData>>,
     peak_meter_val: Arc<[AtomicF32; 2]>,
 ) -> Option<Box<dyn Editor>> {
+    // let next_gui_scale = ui_data.lock().unwrap().scale_req_queue.pop_front();
+
     create_egui_editor(
         egui_state.clone(),
         (),
@@ -403,13 +405,12 @@ pub fn build_editor(
         |_, _, _| {},
         move |egui_ctx, setter, win_req_queue, _state| {
             egui_extras::install_image_loaders(egui_ctx);
-            let next_gui_scale = ui_data.lock().unwrap().scale_req_queue.pop_front();
 
             panel_baseline(
                 "main",
                 egui_ctx,
                 egui_state.as_ref(),
-                next_gui_scale,
+                None,
                 |ui| {
                     let plot_color = Color32::from_hex("#161a19").unwrap();
                     ui.visuals_mut().extreme_bg_color = plot_color;
@@ -513,7 +514,7 @@ pub fn build_editor(
                                     format!("{:.0}", res)
                                 }
                             })
-                            .label_formatter(|_, value| {
+                            .label_formatter(|value| {
                                 let uidata = ui_data.lock().unwrap();
 
                                 let pitch = pitchy::Pitch::new(
@@ -541,7 +542,7 @@ pub fn build_editor(
                                     },
                                 };
                                 if uidata.is_dragging {
-                                    format!(
+                                    Some(format!(
                                         "filter {}\nfreq:{:.0}\nNote:{}\nGain:{:.2}",
                                         uidata.curr_mbc_idx,
                                         params.comps[uidata.curr_mbc_idx].center_freq.value(),
@@ -549,13 +550,20 @@ pub fn build_editor(
                                         gain_to_db_fast(
                                             params.comps[uidata.curr_mbc_idx].gain.value()
                                         )
-                                    )
+                                    ))
                                 } else {
-                                    format!(
-                                        "freq:{:.0}\nGain:{:.2}",
-                                        10.0_f64.powf(value.x),
-                                        value.y
-                                    )
+                                    match value {
+                                        egui_plot::HoverPosition::NearDataPoint {
+                                            plot_name,
+                                            position,
+                                            index,
+                                        } => Some(format!(
+                                            "freq:{:.0}\nGain:{:.2}",
+                                            10.0_f64.powf(position.x),
+                                            position.y
+                                        )),
+                                        _ => None,
+                                    }
                                 }
                             });
 

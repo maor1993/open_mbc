@@ -11,32 +11,39 @@ description = "Open Multi band compressor"
 members = ["xtask"]
 
 [lib]
-crate-type = ["lib","cdylib"]
+crate-type = ["lib", "cdylib"]
 
 [build-dependencies]
 anyhow = "1.0.100"
-vergen-git2 = { version = "1.0.7", features = ["build", "cargo", "rustc", "si"] }
+vergen-git2 = { version = "1.0.7", features = [
+    "build",
+    "cargo",
+    "rustc",
+    "si",
+] }
 
 [dependencies]
-nice-plug = { git = "https://codeberg.org/RustAudio/nice-plug.git", features = [
+nice-plug = { version = "0.2.3", features = [
     "assert_process_allocs",
-    "standalone"
+    "standalone",
 ] }
-nice-plug-egui = { git = "https://codeberg.org/RustAudio/nice-plug.git"}
-cute-dsp = { git = "https://github.com/maor1993/RSCuteDSP.git", features = ["std"] }
+nice-plug-egui = { version = "0.3.0"}
+cute-dsp = { git = "https://github.com/maor1993/RSCuteDSP.git", features = [
+    "std",
+] }
 crossbeam = "0.8.4"
 anyhow = "1.0.100"
 
-egui_plot = {git="https://github.com/emilk/egui_plot.git"}
+egui_plot = { version = "0.36.0" }
 num-complex = "0.4.6"
 egui_knob = "0.3.14"
 splines = "5.0.0"
-egui_extras = { version = "0.34.2", features = ["svg"] }
+egui_extras = { version = "0.35.0", features = ["svg"] }
 pitchy = "0.2.0"
-egui = "0.34.2"
+egui = "0.35.0"
 
 [dev-dependencies]
-plotters = {version = "0.3.7"}
+plotters = { version = "0.3.7" }
 wavers = "1.5.1"
 
 
