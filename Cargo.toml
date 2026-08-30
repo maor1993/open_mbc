@@ -23,24 +23,24 @@ vergen-git2 = { version = "1.0.7", features = [
 ] }
 
 [dependencies]
-nice-plug = { version = "0.2.3", features = [
+nice-plug = { version = "0.3.0", features = [
     "assert_process_allocs",
     "standalone",
 ] }
-nice-plug-egui = { version = "0.3.0"}
+nice-plug-egui = { version = "0.4.0"}
 cute-dsp = { git = "https://github.com/maor1993/RSCuteDSP.git", features = [
     "std",
 ] }
 crossbeam = "0.8.4"
 anyhow = "1.0.100"
 
-egui_plot = { version = "0.36.0" }
+egui_plot = { version = "0.37.0" }
 num-complex = "0.4.6"
-egui_knob = "0.3.14"
+egui_knob = "0.5.0"
 splines = "5.0.0"
-egui_extras = { version = "0.35.0", features = ["svg"] }
+egui_extras = { version = "0.36.1", features = ["svg"] }
 pitchy = "0.2.0"
-egui = "0.35.0"
+egui = "0.36.1"
 
 [dev-dependencies]
 plotters = { version = "0.3.7" }

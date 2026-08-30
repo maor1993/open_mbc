@@ -1,5 +1,10 @@
+use nice_plug::context::gui::GuiContext;
 use nice_plug::prelude::*;
 use nice_plug::util::gain_to_db_fast;
+use nice_plug_egui::create_egui_editor;
+use nice_plug_egui::EguiNiceSettings;
+use nice_plug_egui::NiceEguiApp;
+use nice_plug_egui::RepaintNotifier;
 use num_complex::Complex64;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -12,31 +17,41 @@ mod crossover;
 use crossover::Crossover;
 
 mod ui;
-use ui::build_editor;
+use ui::build_ui;
 use ui::PeakMeter;
 use ui::UiData;
 
-use nice_plug_egui::EguiState;
+use nice_plug_egui::{EguiEditor, EguiEditorState};
 
 use cute_dsp::stft::STFT;
 
 use crate::ui::NUM_OF_FILTER_POINTS;
 use crate::ui::NUM_OF_VIZ_FFT_POINTS;
+
+pub struct OpenMbcEditor {
+    params: Arc<OpenMbcParams>,
+    open_state: Option<OpenEditorState>,
+
+    ui_data: Arc<Mutex<UiData>>,
+    peak_meter_result: Arc<[AtomicF32; 2]>,
+}
+
 pub struct OpenMbc {
+    editor_state: Arc<EguiEditorState>,
     params: Arc<OpenMbcParams>,
     sample_rate: f32,
-    comp_filt_state: [[CompFilter; 2]; MAX_MBCS], //stereo channel per compressor
+
     ui_data: Arc<Mutex<UiData>>,
-    spectrum_handle: SpecturmSubSystem,
-    peak_meter: [ui::PeakMeter; 2],
     peak_meter_result: Arc<[AtomicF32; 2]>,
+    comp_filt_state: [[CompFilter; 2]; MAX_MBCS], //stereo channel per compressor
+    peak_meter: [ui::PeakMeter; 2],
+    spectrum_handle: SpecturmSubSystem,
+    repaint_notifier: RepaintNotifier,
+    initial_editor: Option<OpenMbcEditor>,
 }
 
 #[derive(Params)]
 struct OpenMbcParams {
-    #[persist = "editor-state"]
-    editor_state: Arc<EguiState>,
-
     #[nested(array, group = "Comps")]
     pub comps: [CompParams; MAX_MBCS],
 
@@ -248,16 +263,35 @@ impl Default for CompFilter {
 
 impl Default for OpenMbc {
     fn default() -> Self {
+        let params = Arc::new(OpenMbcParams::default());
+        let ui_data = Arc::new(Mutex::new(UiData::default()));
+        let peak_meter_result = Arc::new([AtomicF32::new(0.0), AtomicF32::new(0.0)]);
+        let initial_editor = OpenMbcEditor {
+            open_state: None,
+            params: params.clone(),
+            ui_data: ui_data.clone(),
+            peak_meter_result: peak_meter_result.clone(),
+        };
         Self {
-            params: Arc::new(OpenMbcParams::default()),
+            params,
+            peak_meter_result,
+            ui_data,
             sample_rate: 0.0,
             comp_filt_state: std::array::from_fn(|_| {
                 std::array::from_fn(|_| CompFilter::default())
             }),
-            ui_data: Arc::new(Mutex::new(UiData::default())),
             spectrum_handle: SpecturmSubSystem::new(),
             peak_meter: std::array::from_fn(|_| PeakMeter::new()),
-            peak_meter_result: Arc::new([AtomicF32::new(0.0), AtomicF32::new(0.0)]),
+            editor_state: EguiEditorState::from_size(
+                nice_plug::editor::dpi::LogicalSize {
+                    width: 1024.0,
+                    height: 640.0,
+                },
+                1.0,
+            ),
+
+            repaint_notifier: RepaintNotifier::new(),
+            initial_editor: Some(initial_editor),
         }
     }
 }
@@ -265,8 +299,6 @@ impl Default for OpenMbc {
 impl Default for OpenMbcParams {
     fn default() -> Self {
         Self {
-            editor_state: EguiState::from_size(nice_plug::editor::dpi::LogicalSize { width: 1024.0, height: 640.0 }),
-
             comps: std::array::from_fn(|_| CompParams::default()),
             solo: IntParam::new(
                 "solo_filter",
@@ -289,6 +321,49 @@ impl Default for OpenMbcParams {
     }
 }
 
+struct OpenEditorState {
+    _egui_ctx: egui::Context,
+    nice_gui_ctx: GuiContext,
+    is_dragging_slider: bool,
+}
+
+impl OpenEditorState {
+    fn new(egui_ctx: egui::Context, nice_gui_ctx: GuiContext) -> Self {
+        Self {
+            _egui_ctx: egui_ctx,
+            nice_gui_ctx,
+            is_dragging_slider: false,
+        }
+    }
+}
+
+impl NiceEguiApp for OpenMbcEditor {
+    fn build(
+        &mut self,
+        egui_ctx: egui::Context,
+        nice_gui_ctx: nice_plug::context::gui::GuiContext,
+        frame: &mut nice_plug_egui::Frame,
+    ) -> Result<(), nice_plug_egui::baseview::HandlerError> {
+        self.open_state = Some(OpenEditorState::new(egui_ctx, nice_gui_ctx));
+        Ok(())
+    }
+    fn editor_closed(&mut self) {
+        self.open_state = None;
+    }
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut nice_plug_egui::Frame) {
+        let params = self.params.clone();
+        let ui_data = self.ui_data.clone();
+        let pmv = self.peak_meter_result.clone();
+
+        let Some(state) = self.open_state.as_mut() else {
+            return;
+        };
+        let setter = state.nice_gui_ctx.param_setter();
+        egui_extras::install_image_loaders(&state._egui_ctx);
+        build_ui(ui, params, ui_data, &setter, pmv);
+    }
+}
+
 impl Plugin for OpenMbc {
     const NAME: &'static str = "Open Mbc";
     const VENDOR: &'static str = "Maor Malka";
@@ -299,24 +374,14 @@ impl Plugin for OpenMbc {
 
     // The first audio IO layout is used as the default. The other layouts may be selected either
     // explicitly or automatically by the host or the user depending on the plugin API/backend.
-    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[
-        AudioIOLayout {
-            main_input_channels: NonZeroU32::new(2),
-            main_output_channels: NonZeroU32::new(2),
+    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
+        main_input_channels: NonZeroU32::new(2),
+        main_output_channels: NonZeroU32::new(2),
 
-            aux_input_ports: &[new_nonzero_u32(2)],
+        aux_input_ports: &[new_nonzero_u32(2)],
 
-            ..AudioIOLayout::const_default()
-        },
-        // AudioIOLayout {
-        //     main_input_channels: NonZeroU32::new(1),
-        //     main_output_channels: NonZeroU32::new(1),
-
-        //     aux_input_ports: &[new_nonzero_u32(1)],
-
-        //     ..AudioIOLayout::const_default()
-        // },
-    ];
+        ..AudioIOLayout::const_default()
+    }];
 
     const MIDI_INPUT: MidiConfig = MidiConfig::None;
     const MIDI_OUTPUT: MidiConfig = MidiConfig::None;
@@ -332,15 +397,26 @@ impl Plugin for OpenMbc {
     // tasks.
     type BackgroundTask = ();
 
+    type Editor = EguiEditor<OpenMbcEditor>;
+
     fn params(&self) -> Arc<dyn Params> {
         self.params.clone()
     }
 
-    fn initialize(
+    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Self::Editor> {
+        create_egui_editor(
+            self.editor_state.clone(),
+            self.repaint_notifier.clone(),
+            EguiNiceSettings::new(),
+            self.initial_editor.take().unwrap(),
+        )
+    }
+
+    fn activate(
         &mut self,
         _audio_io_layout: &AudioIOLayout,
         buffer_config: &BufferConfig,
-        _context: &mut impl InitContext<Self>,
+        _context: &mut impl ActivateContext<Self>,
     ) -> bool {
         // Resize buffers and perform other potentially expensive initialization operations here.
         // The `reset()` function is always called right after this function. You can remove this
@@ -357,7 +433,7 @@ impl Plugin for OpenMbc {
         }
         self.spectrum_handle.configure();
 
-        //Note that this section also handles restoration of parameters when project is loaded, 
+        //Note that this section also handles restoration of parameters when project is loaded,
         //as such, we will take the values provided by tool.
         for (idx, cf_channel) in self.comp_filt_state.iter_mut().enumerate() {
             for comp_filt in cf_channel.iter_mut() {
@@ -369,12 +445,23 @@ impl Plugin for OpenMbc {
 
                 comp_filt.comp.update_sample_rate(self.sample_rate);
 
-                comp_filt.comp.solver.threshold = gain_to_db_fast(self.params.comps[idx].threshold.value());
-                comp_filt.comp.max_reduciton = -gain_to_db_fast(self.params.comps[idx].range.value());
-      
-                comp_filt.comp.solver.update_attack(self.params.comps[idx].attack.value());
-                comp_filt.comp.solver.update_release(self.params.comps[idx].release.value());
-                comp_filt.comp.solver.update_ratio(self.params.comps[idx].ratio.value());
+                comp_filt.comp.solver.threshold =
+                    gain_to_db_fast(self.params.comps[idx].threshold.value());
+                comp_filt.comp.max_reduciton =
+                    -gain_to_db_fast(self.params.comps[idx].range.value());
+
+                comp_filt
+                    .comp
+                    .solver
+                    .update_attack(self.params.comps[idx].attack.value());
+                comp_filt
+                    .comp
+                    .solver
+                    .update_release(self.params.comps[idx].release.value());
+                comp_filt
+                    .comp
+                    .solver
+                    .update_ratio(self.params.comps[idx].ratio.value());
             }
         }
 
@@ -386,14 +473,6 @@ impl Plugin for OpenMbc {
         // allocate. You can remove this function if you do not need it.
     }
 
-    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
-        let params = self.params.clone();
-        let egui_state = params.editor_state.clone();
-        let ui_data = self.ui_data.clone();
-        let pmv = self.peak_meter_result.clone();
-        build_editor(params, egui_state, ui_data, pmv)
-    }
-
     fn process(
         &mut self,
         buffer: &mut Buffer,
@@ -402,7 +481,8 @@ impl Plugin for OpenMbc {
     ) -> ProcessStatus {
         //redraw filters (when allowed)
 
-        if self.params.editor_state.is_open() {
+        if true {
+            self.repaint_notifier.request_repaint();
             if let Ok(mut uidata) = self.ui_data.try_lock() {
                 //TODO: might skip this as we process all the relevant indecies anyway
                 uidata.set_filter_shape(0.0);
@@ -698,7 +778,7 @@ impl Plugin for OpenMbc {
             //write peak meter value
         }
         if self.spectrum_handle.samples_in_buf < NUM_OF_VIZ_FFT_POINTS {
-            if self.params.editor_state.is_open() {
+            if true {
                 if self.spectrum_handle.samples_in_buf + samples_to_copy > NUM_OF_VIZ_FFT_POINTS {
                     samples_to_copy = NUM_OF_VIZ_FFT_POINTS - self.spectrum_handle.samples_in_buf;
                 }
