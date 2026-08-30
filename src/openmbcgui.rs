@@ -283,7 +283,7 @@ fn create_state_tooltip(
                 setter,
                 "Freq",
                 false,
-                Some(10.0),
+                None,
                 idx_changed,
                 Some(|x| format!("{:.0}", x)),
             );
@@ -337,7 +337,7 @@ fn create_state_tooltip(
                 setter,
                 "Attack",
                 false,
-                Some(1.0),
+                None,
                 idx_changed,
                 Some(|x| format!("{:.0}", x)),
             );
@@ -347,7 +347,7 @@ fn create_state_tooltip(
                 setter,
                 "Release",
                 false,
-                Some(1.0),
+                None,
                 idx_changed,
                 Some(|x| format!("{:.0}", x)),
             );
