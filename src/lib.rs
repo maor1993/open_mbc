@@ -16,17 +16,17 @@ use compressor::Compressor;
 mod crossover;
 use crossover::Crossover;
 
-mod ui;
-use ui::build_ui;
-use ui::PeakMeter;
-use ui::UiData;
+mod openmbcgui;
+use openmbcgui::build_ui;
+use openmbcgui::PeakMeter;
+use openmbcgui::UiData;
 
 use nice_plug_egui::{EguiEditor, EguiEditorState};
 
 use cute_dsp::stft::STFT;
 
-use crate::ui::NUM_OF_FILTER_POINTS;
-use crate::ui::NUM_OF_VIZ_FFT_POINTS;
+use crate::openmbcgui::NUM_OF_FILTER_POINTS;
+use crate::openmbcgui::NUM_OF_VIZ_FFT_POINTS;
 
 pub struct OpenMbcEditor {
     params: Arc<OpenMbcParams>,
@@ -44,7 +44,7 @@ pub struct OpenMbc {
     ui_data: Arc<Mutex<UiData>>,
     peak_meter_result: Arc<[AtomicF32; 2]>,
     comp_filt_state: [[CompFilter; 2]; MAX_MBCS], //stereo channel per compressor
-    peak_meter: [ui::PeakMeter; 2],
+    peak_meter: [openmbcgui::PeakMeter; 2],
     spectrum_handle: SpecturmSubSystem,
     repaint_notifier: RepaintNotifier,
     initial_editor: Option<OpenMbcEditor>,
@@ -428,7 +428,7 @@ impl Plugin for OpenMbc {
             uidata.sample_rate = self.sample_rate;
 
             for peakmeter in self.peak_meter.iter_mut() {
-                peakmeter.update_decay(ui::PEAK_METER_DECAY_MS, self.sample_rate);
+                peakmeter.update_decay(openmbcgui::PEAK_METER_DECAY_MS, self.sample_rate);
             }
         }
         self.spectrum_handle.configure();
@@ -494,7 +494,7 @@ impl Plugin for OpenMbc {
                     .enumerate()
                     .for_each(|(idx, comp_filt)| {
                         if self.params.comps[idx].enable.value() {
-                            let main_filter_mag = ui::utils::get_filter_shape(
+                            let main_filter_mag = openmbcgui::utils::get_filter_shape(
                                 self.sample_rate,
                                 &comp_filt[0].filt,
                                 self.params.comps[idx].slope.value(),
